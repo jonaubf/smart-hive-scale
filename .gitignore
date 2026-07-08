@@ -19,3 +19,4 @@ include/build_env.h
 *.swp
 *.swo
 .idea/
+.cursor/
