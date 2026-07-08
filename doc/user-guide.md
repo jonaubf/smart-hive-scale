@@ -121,8 +121,20 @@ Portal sections: calibration, WiFi, GSM/APN, operating mode, MQTT broker, firmwa
 
 - **GSM:** modem and WiFi off between reports; only wakes for measure → publish → sleep.
 - **WiFi:** STA may stay up at home; device still deep-sleeps the ESP32 between cycles.
-- **Setup button short press** after deep sleep wakes the device for a **5-minute bench window** (serial + portal). Typing on serial extends the window.
+- **Setup button short press** after deep sleep wakes the device for a **5-minute bench window** (serial + portal). Serial commands extend the window.
 - Serial `sleep` forces deep sleep immediately; `send` runs one publish cycle now.
+
+### Escape hatch (GSM boot)
+
+A GSM cold boot (power connect, reset, reflash) starts a headless publish cycle that blocks for several minutes. The device prints:
+
+```
+Publish cycle starts in 5s — press setup button or hit Enter for bench mode
+```
+
+- **Within 5 s:** press the setup button or send any serial byte → the publish cycle is skipped and the device enters bench mode. Use this to fix wrong settings (e.g. bad MQTT host) that would otherwise make every boot hang in connect timeouts.
+- **During the publish cycle** (network wait, MQTT connect, retry backoff): press the setup button or send serial → aborts and enters bench mode. Each TCP connect attempt takes up to **15 s**; the button is checked between attempts.
+- **During retry backoff** (`Publish failed — retry in 30s`): same — button or serial aborts and enters bench mode.
 
 ### Report interval
 
@@ -322,8 +334,7 @@ Create via **Settings → Automations** or paste into `automations.yaml`.
 
 ### USB maintenance (apiary visit)
 
-1. **GSM field mode:** cold boot publishes once and sleeps. Press the **setup button** (short press) to wake into bench mode for serial commands.
-2. Connect USB or press setup button to wake from deep sleep.
+1. **GSM field mode:** cold boot publishes once and sleeps. To get an interactive session instead, use the **5-second escape window** at boot (press setup button or hit Enter), or press the setup button after the device is asleep.
 2. Serial monitor 115200 — live `weight_kg` / `mqtt_payload` lines.
 3. Commands: `show`, `send`, `portal`, `setint`, `reboot`, `sleep`.
 4. After **5 minutes** without serial input, device publishes once and sleeps (unless AP portal is open).
@@ -350,6 +361,7 @@ Create via **Settings → Automations** or paste into `automations.yaml`.
 | HA entities missing | Package installed, HA restarted, topic `beekpr/hive-01/state` received |
 | Device “offline” too soon | Lower `expire_after` in YAML or increase `setint` |
 | Brownout on AP connect | Power from charged battery; IP5306 boost enabled in firmware |
+| Stuck retrying a wrong broker (GSM) | Reset/reflash, then use the **5 s escape window** (button or Enter) → bench mode → fix host via `portal` |
 
 ---
 

@@ -14,6 +14,7 @@
 #include "mqtt_settings.h"
 #include "ip5306.h"
 #include "pins.h"
+#include "setup_button.h"
 
 namespace {
 
@@ -311,15 +312,24 @@ bool modemManagerWaitForNetwork(unsigned long timeoutMs) {
   }
 
   Serial.printf("Waiting for network (%lu s max)...\n", timeoutMs / 1000UL);
-  const bool ok = modem.waitForNetwork(timeoutMs, true);
-  status.networkRegistered = modem.isNetworkConnected();
-  if (!ok) {
-    Serial.println(F("ERR network registration timeout"));
-    return false;
+  const unsigned long deadline = millis() + timeoutMs;
+  while (static_cast<long>(millis() - deadline) < 0) {
+    if (setupButtonBreakRequested()) {
+      Serial.println(F("Setup button / serial — aborting network wait"));
+      status.networkRegistered = modem.isNetworkConnected();
+      return false;
+    }
+    if (modem.waitForNetwork(2000, true)) {
+      status.networkRegistered = modem.isNetworkConnected();
+      Serial.println(F("OK network registered"));
+      return true;
+    }
+    status.networkRegistered = modem.isNetworkConnected();
   }
 
-  Serial.println(F("OK network registered"));
-  return true;
+  status.networkRegistered = modem.isNetworkConnected();
+  Serial.println(F("ERR network registration timeout"));
+  return false;
 }
 
 bool modemManagerGprsConnect() {

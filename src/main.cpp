@@ -50,7 +50,13 @@ void runScheduledCycleAndSleep() {
   if (connectivityMode() != ConnectivityMode::WifiSta) {
     radioPowerDown();
   }
+  setupButtonClearBreak();
   appSchedulerRunPublishCycle();
+  if (setupButtonBreakWasRequested()) {
+    modemManagerGprsDisconnect();
+    modemManagerPowerOff();
+    return;
+  }
   appSchedulerEnterDeepSleep();
 }
 
@@ -308,10 +314,39 @@ void handleCommand(const String &line) {
       F("ERR unknown command (tare | cal <kg> | show | reset | setint | setcell | setmode | setwificred | wificonn | modem | gprs | mqttls | mqtt | send | sleep | modemoff | portal | reboot)"));
 }
 
+// Escape hatch before a headless GSM publish cycle: the cycle blocks for
+// minutes and ignores input, so give the user a short window to reach bench
+// mode (press the setup button or send any serial byte).
+bool benchEscapeRequested() {
+  Serial.println(F("Publish cycle starts in 5s — press setup button or hit Enter for bench mode"));
+  const unsigned long deadline = millis() + 5000UL;
+  while (static_cast<long>(millis() - deadline) < 0) {
+    if (digitalRead(PIN_SETUP_BUTTON) == LOW || Serial.available() > 0) {
+      while (Serial.available() > 0) {
+        Serial.read();
+      }
+      Serial.println(F("Bench mode requested — skipping publish cycle"));
+      return true;
+    }
+    delay(10);
+  }
+  return false;
+}
+
 void pollSerialCommands() {
   while (Serial.available() > 0) {
     const char ch = static_cast<char>(Serial.read());
     if (ch == '\n' || ch == '\r') {
+      // Swallow the rest of a CRLF before dispatching: blocking commands
+      // (mqtt/send) poll Serial.available() as an abort signal and a stray
+      // '\n' would cancel them instantly.
+      while (Serial.available() > 0) {
+        const int next = Serial.peek();
+        if (next != '\n' && next != '\r') {
+          break;
+        }
+        Serial.read();
+      }
       handleCommand(commandBuffer);
       commandBuffer = "";
       continue;
@@ -347,8 +382,11 @@ void setup() {
 
   if (wakeCause == WakeCause::PowerOn && connectivityMode() == ConnectivityMode::Gsm) {
     // Field GSM: cold boot / battery connect → publish once, then sleep.
-    // USB bench work: press setup button to wake into bench mode.
-    runScheduledCycleAndSleep();
+    // The 5s escape window lets you reach bench mode (fix bad settings)
+    // instead of being locked into a minutes-long blocking publish cycle.
+    if (!benchEscapeRequested()) {
+      runScheduledCycleAndSleep();
+    }
   }
 
   // Button wake, or WiFi power-on (home setup): interactive bench mode.
@@ -397,6 +435,9 @@ void loop() {
   if (benchModeActive && static_cast<long>(millis() - benchDeadlineMs) >= 0) {
     Serial.println(F("Bench window expired — publishing and going to sleep"));
     runScheduledCycleAndSleep();
+    // Only reached when the cycle was aborted (button/serial): stay in bench
+    // mode with a fresh window instead of re-triggering the publish instantly.
+    extendBenchWindow();
   }
 
   if (!benchModeActive) {

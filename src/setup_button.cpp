@@ -10,6 +10,7 @@ namespace {
 constexpr unsigned long DEBOUNCE_MS = 50;
 bool holdAnnounced = false;
 bool portalRequested = false;
+bool breakRequested = false;
 bool wasPressed = false;
 unsigned long pressStartMs = 0;
 unsigned long lastEdgeMs = 0;
@@ -54,3 +55,22 @@ bool setupButtonPortalRequested() {
 
   return false;
 }
+
+bool setupButtonBreakRequested() {
+  if (digitalRead(PIN_SETUP_BUTTON) == LOW) {
+    breakRequested = true;
+    return true;
+  }
+  if (Serial.available() > 0) {
+    while (Serial.available() > 0) {
+      Serial.read();
+    }
+    breakRequested = true;
+    return true;
+  }
+  return false;
+}
+
+bool setupButtonBreakWasRequested() { return breakRequested; }
+
+void setupButtonClearBreak() { breakRequested = false; }

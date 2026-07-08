@@ -11,6 +11,7 @@
 #include "mqtt_client.h"
 #include "pins.h"
 #include "radio_manager.h"
+#include "setup_button.h"
 #include "weight_sensor.h"
 #include "wifi_manager.h"
 
@@ -43,10 +44,22 @@ bool appSchedulerRunPublishCycle() {
                                  MODEM_MQTT_CONNECT_TIMEOUT_MS)) {
       return true;
     }
+    if (setupButtonBreakWasRequested()) {
+      Serial.println(F("Publish aborted — entering bench mode"));
+      return false;
+    }
     if (attempt < PUBLISH_MAX_ATTEMPTS) {
       const unsigned long backoffMs = PUBLISH_RETRY_BASE_DELAY_MS * attempt;
-      Serial.printf("Publish failed — retry in %lus\n", backoffMs / 1000UL);
-      delay(backoffMs);
+      Serial.printf("Publish failed — retry in %lus (setup button aborts)\n",
+                    backoffMs / 1000UL);
+      const unsigned long deadline = millis() + backoffMs;
+      while (static_cast<long>(millis() - deadline) < 0) {
+        if (setupButtonBreakRequested()) {
+          Serial.println(F("Setup button / serial — aborting retries"));
+          return false;
+        }
+        delay(50);
+      }
     }
   }
   Serial.println(F("ERR publish failed after all attempts — sleeping anyway"));

@@ -13,6 +13,7 @@
 #include "gsm_settings.h"
 #include "modem_manager.h"
 #include "mqtt_settings.h"
+#include "setup_button.h"
 #include "telemetry_payload.h"
 #include "weight_sensor.h"
 #include "wifi_manager.h"
@@ -20,6 +21,7 @@
 namespace {
 
 constexpr size_t kMqttBufferSize = 512;
+constexpr int kMqttTcpAttemptSec = 15;
 
 // Pump modem.maintain() on every socket I/O — required for TLS over SIM800 GPRS.
 class PumpingGsmClient : public Client {
@@ -29,9 +31,7 @@ class PumpingGsmClient : public Client {
   }
 
   int connect(const char *host, uint16_t port) override {
-    const int timeoutSec =
-        static_cast<int>((MODEM_TLS_HANDSHAKE_TIMEOUT_MS + 999UL) / 1000UL);
-    return connect(host, port, timeoutSec);
+    return connect(host, port, kMqttTcpAttemptSec);
   }
 
   int connect(const char *host, uint16_t port, int timeoutSec) {
@@ -235,7 +235,6 @@ bool mqttConnect(unsigned long timeoutMs) {
 
   mqttClient.setServer(brokerHost, brokerPort);
   mqttClient.setBufferSize(kMqttBufferSize);
-  mqttClient.setSocketTimeout(static_cast<uint16_t>((timeoutMs + 999UL) / 1000UL));
 
   stopTransport();
 
@@ -249,7 +248,9 @@ bool mqttConnect(unsigned long timeoutMs) {
         delay(20);
       }
     }
-    tlsTransportClient().setTimeout(timeoutMs);
+    // TLS handshake on 2G legitimately takes 30-120s — do not shorten this.
+    // The TCP connect stage below it still uses kMqttTcpAttemptSec.
+    tlsTransportClient().setTimeout(MODEM_TLS_HANDSHAKE_TIMEOUT_MS);
     mqttClient.setClient(tlsTransportClient());
   } else {
     mqttClient.setClient(plainTransportClient());
@@ -258,9 +259,21 @@ bool mqttConnect(unsigned long timeoutMs) {
   Serial.printf("MQTT connect %s:%u tls=%d user=%s (up to %lus)...\n", brokerHost,
                 static_cast<unsigned>(brokerPort), useTls ? 1 : 0, MQTT_USERNAME,
                 timeoutMs / 1000UL);
+  Serial.printf("(setup button or serial aborts; each TCP try up to %us)\n",
+                static_cast<unsigned>(kMqttTcpAttemptSec));
+
+  mqttClient.setSocketTimeout(static_cast<uint16_t>(kMqttTcpAttemptSec));
 
   const unsigned long deadline = millis() + timeoutMs;
   while (!mqttClient.connected()) {
+    if (setupButtonBreakRequested()) {
+      Serial.println(F("Setup button / serial — aborting MQTT connect"));
+      stopTransport();
+      return false;
+    }
+    if (!usingWifiTransport()) {
+      modemManagerPump();
+    }
     if (mqttClient.connect(DEVICE_ID, MQTT_USERNAME, MQTT_PASSWORD)) {
       Serial.println(F("OK MQTT connected"));
       return true;
@@ -272,9 +285,13 @@ bool mqttConnect(unsigned long timeoutMs) {
       Serial.println(F("HINT: TLS slow on 2G — retry mqtt; handshake may take 60-120s"));
     }
     if (static_cast<long>(millis() - deadline) >= 0) {
+      stopTransport();
       return false;
     }
-    delay(1000);
+    if (!usingWifiTransport()) {
+      modemManagerPump();
+    }
+    delay(500);
   }
 
   return false;

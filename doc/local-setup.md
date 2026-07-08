@@ -160,7 +160,18 @@ Serial monitor at **115200 baud**. Commands:
 | `setwificred MySSID mypass` | Store WiFi credentials in NVS |
 | `portal` | Open config portal immediately (same as 10s button hold) |
 | `wificonn` | Connect to saved WiFi (when `setmode wifi`) and print status |
+| `send` | Run one full publish cycle now (with retries) |
+| `sleep` | Enter deep sleep immediately (wake: setup button or timer) |
 | `reboot` | Restart the device |
+
+### Bench mode and deep sleep
+
+- **GSM mode, cold boot** (reset/reflash/power connect): the device prints `Publish cycle starts in 5s — press setup button or hit Enter for bench mode`. Do nothing → it publishes headlessly and deep-sleeps. Press the button or hit Enter within 5 s → interactive bench mode (all commands above).
+- **WiFi mode, cold boot:** bench mode starts directly.
+- Bench mode lasts **5 minutes**; each serial command extends it. When it expires, the device publishes once and deep-sleeps.
+- From deep sleep, a **short button press** wakes into bench mode; the RTC timer wakes into a headless publish cycle.
+- During publish retries (`Publish failed — retry in 30s`), pressing the setup button or sending serial aborts and enters bench mode.
+- During network wait and MQTT connect, button/serial aborts between TCP attempts (each attempt up to **15 s**).
 
 ### Config portal (button or `portal` command)
 
