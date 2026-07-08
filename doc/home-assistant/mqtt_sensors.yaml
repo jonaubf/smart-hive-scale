@@ -1,0 +1,231 @@
+# Beekpr hive MQTT entities — one Home Assistant device per hive.
+#
+# Install:
+#   1. Copy this file to your HA config folder, e.g. config/packages/beekpr_hive_01.yaml
+#   2. Enable packages in configuration.yaml (if not already):
+#        homeassistant:
+#          packages: !include_dir_named packages/
+#   3. Replace every "hive-01" / "hive_01" below if your DEVICE_ID differs.
+#   4. Restart Home Assistant.
+#
+# Prerequisites: MQTT integration connected to local Mosquitto on 127.0.0.1:1883.
+# The hive must publish JSON to beekpr/hive-01/state (see doc/user-guide.md).
+
+mqtt:
+  sensor:
+    - name: Hive 01 Weight
+      unique_id: beekpr_hive_01_weight_kg
+      object_id: hive_01_weight
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.weight_kg }}"
+      unit_of_measurement: kg
+      state_class: measurement
+      device_class: weight
+      icon: mdi:scale-bathroom
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: &beekpr_hive_01_device
+        identifiers:
+          - beekpr_hive_01
+        name: Hive 01
+        manufacturer: Beekpr
+        model: Hive Weight Monitor
+        configuration_url: http://beekpr-hive-01.local
+
+    - name: Hive 01 Weight (stable)
+      unique_id: beekpr_hive_01_stable_kg
+      object_id: hive_01_weight_stable
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.stable_kg }}"
+      unit_of_measurement: kg
+      state_class: measurement
+      device_class: weight
+      icon: mdi:scale
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 Battery
+      unique_id: beekpr_hive_01_battery_pct
+      object_id: hive_01_battery
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.battery_pct }}"
+      unit_of_measurement: "%"
+      state_class: measurement
+      device_class: battery
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 Battery voltage
+      unique_id: beekpr_hive_01_battery_v
+      object_id: hive_01_battery_voltage
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.battery_v }}"
+      unit_of_measurement: V
+      state_class: measurement
+      device_class: voltage
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 GSM signal
+      unique_id: beekpr_hive_01_rssi
+      object_id: hive_01_gsm_rssi
+      state_topic: beekpr/hive-01/state
+      value_template: >-
+        {% set v = value_json.rssi | int(-1) %}
+        {{ v if v >= 0 else 'unknown' }}
+      icon: mdi:signal-cellular-3
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 WiFi hostname
+      unique_id: beekpr_hive_01_wifi_hostname
+      object_id: hive_01_wifi_hostname
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.wifi_hostname }}"
+      icon: mdi:lan
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 WiFi IP
+      unique_id: beekpr_hive_01_wifi_ip
+      object_id: hive_01_wifi_ip
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.wifi_ip }}"
+      icon: mdi:ip-network
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 WiFi signal
+      unique_id: beekpr_hive_01_wifi_rssi
+      object_id: hive_01_wifi_rssi
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.wifi_rssi }}"
+      unit_of_measurement: dBm
+      state_class: measurement
+      device_class: signal_strength
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 Cell MCC
+      unique_id: beekpr_hive_01_cell_mcc
+      object_id: hive_01_cell_mcc
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.cell_mcc }}"
+      icon: mdi:transmission-tower
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 Cell MNC
+      unique_id: beekpr_hive_01_cell_mnc
+      object_id: hive_01_cell_mnc
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.cell_mnc }}"
+      icon: mdi:transmission-tower
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 Cell LAC
+      unique_id: beekpr_hive_01_cell_lac
+      object_id: hive_01_cell_lac
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.cell_lac }}"
+      icon: mdi:map-marker-radius
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 Cell CID
+      unique_id: beekpr_hive_01_cell_cid
+      object_id: hive_01_cell_cid
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.cell_cid }}"
+      icon: mdi:map-marker-radius
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 Report interval
+      unique_id: beekpr_hive_01_tx_interval_sec
+      object_id: hive_01_report_interval
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.tx_interval_sec }}"
+      unit_of_measurement: s
+      icon: mdi:timer-outline
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+  binary_sensor:
+    - name: Hive 01 Online
+      unique_id: beekpr_hive_01_availability
+      object_id: hive_01_online
+      state_topic: beekpr/hive-01/availability
+      payload_on: online
+      payload_off: offline
+      device_class: connectivity
+      icon: mdi:bee
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 WiFi connected
+      unique_id: beekpr_hive_01_wifi_connected
+      object_id: hive_01_wifi_connected
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.wifi_connected }}"
+      payload_on: "true"
+      payload_off: "false"
+      device_class: connectivity
+      icon: mdi:wifi
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device

@@ -1,0 +1,42 @@
+# Optional Home Assistant automations for Beekpr hives.
+# Copy snippets into automations.yaml or create via Settings → Automations.
+# Entity IDs assume doc/home-assistant/mqtt_sensors.yaml with DEVICE_ID=hive-01.
+
+# --- Low battery notification ---
+# - id: beekpr_hive_01_low_battery
+#   alias: Hive 01 low battery
+#   triggers:
+#     - trigger: numeric_state
+#       entity_id: sensor.hive_01_battery
+#       below: 20
+#   actions:
+#     - action: notify.mobile_app_your_phone
+#       data:
+#         title: Hive 01 battery low
+#         message: "Battery at {{ states('sensor.hive_01_battery') }}%"
+
+# --- Hive went offline (no fresh MQTT within expire_after) ---
+# - id: beekpr_hive_01_offline
+#   alias: Hive 01 offline
+#   triggers:
+#     - trigger: state
+#       entity_id: binary_sensor.hive_01_online
+#       to: "off"
+#       for: "00:05:00"
+#   actions:
+#     - action: notify.mobile_app_your_phone
+#       data:
+#         title: Hive 01 offline
+#         message: No MQTT update — check power or cellular coverage.
+
+# --- Rapid weight drop (possible swarm or theft) ---
+# - id: beekpr_hive_01_weight_drop
+#   alias: Hive 01 rapid weight drop
+#   triggers:
+#     - trigger: template
+#       value_template: >-
+#         {% set cur = states('sensor.hive_01_weight_stable') | float(0) %}
+#         {% set prev = state_attr('sensor.hive_01_weight_stable', 'last_reported') %}
+#         false
+#   # Prefer a derivative helper or compare to previous state in a template trigger:
+#   # drop > 2 kg between readings — tune threshold for your hive.

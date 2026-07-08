@@ -1,0 +1,5 @@
+# Trust anchor for firmware builds — copy from your CA:
+#   cp ~/beekpr-certs/ca.crt certs/ca.pem
+ca.pem
+*.key
+*.csr
