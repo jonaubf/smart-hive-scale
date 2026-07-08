@@ -7,6 +7,7 @@ End-to-end guide: install the hive scale, calibrate weight, connect MQTT, and vi
 | Topic | Document |
 |-------|----------|
 | Build, flash, bench commands | [`local-setup.md`](local-setup.md) |
+| T-Call pinout and wiring diagrams | [`esp32_sim800l.md`](esp32_sim800l.md) |
 | Mosquitto TLS, certificates, port forward | [`mqtt-tls-setup.md`](mqtt-tls-setup.md) |
 | Home Assistant MQTT entities (YAML) | [`home-assistant/mqtt_sensors.yaml`](home-assistant/mqtt_sensors.yaml) |
 
@@ -37,6 +38,12 @@ Home Assistant shows weight, battery, connectivity, and cell tower info on a sin
 | GSM antenna | Outside the enclosure |
 | Setup button | NO push button: GPIO 13 ↔ GND |
 | IP65 enclosure | Outdoor mounting |
+
+![Wiring diagram](tcall_hx711_wiring.svg)
+
+![TTGO T-Call V1.3 pinout](T-Call.jpg)
+
+Full wiring tables and pin notes: [`local-setup.md` — Wiring](local-setup.md#wiring).
 
 Mount the load cell in **compression** between a fixed base and a top plate under the hive. Constrain lateral movement so the cell only sees vertical load.
 

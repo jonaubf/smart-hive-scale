@@ -34,6 +34,7 @@ See **[Local development setup](doc/local-setup.md)** for wiring, calibration, a
 |-------|-------------|
 | [**User guide**](doc/user-guide.md) | End-to-end: calibrate, connect MQTT, Home Assistant, daily use |
 | [**Local setup**](doc/local-setup.md) | Build, flash, wiring, serial commands, config portal |
+| [**T-Call hardware**](doc/esp32_sim800l.md) | Board pinout and HX711 wiring diagrams |
 | [**MQTT & TLS setup**](doc/mqtt-tls-setup.md) | Mosquitto certificates, port forward, field device security |
 | [**Project specification**](spec.md) | Requirements, architecture, implementation plan |
 | [**Home Assistant YAML**](doc/home-assistant/mqtt_sensors.yaml) | MQTT entities grouped under one device per hive |
@@ -45,7 +46,9 @@ See **[Local development setup](doc/local-setup.md)** for wiring, calibration, a
 - Li-Ion battery, outdoor enclosure, GSM antenna
 - Setup button (GPIO 13 → GND)
 
-Pin map and mechanical notes: [spec §10](spec.md#10-hardware-connections) and [local-setup wiring](doc/local-setup.md#wiring-for-step-2-hx711-bench-test).
+![Wiring: T-Call, HX711, load cell, setup button](doc/tcall_hx711_wiring.svg)
+
+Pin map, mechanical notes, and full tables: [spec §10](spec.md#10-hardware-connections) and [local-setup wiring](doc/local-setup.md#wiring).
 
 ## License
 

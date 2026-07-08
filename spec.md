@@ -304,6 +304,14 @@ reboot
 
 ## 10. Hardware Connections
 
+![Wiring diagram: T-Call, HX711, load cell, setup button](doc/tcall_hx711_wiring.svg)
+
+### TTGO T-Call V1.3 pinout
+
+![TTGO T-Call V1.3 pinout](doc/T-Call.jpg)
+
+SIM800L uses GPIO **26** (RX), **27** (TX), **4** (PWRKEY), **5** (RST), **23** (POWER) — onboard, no user wiring. IP5306 PMIC uses **GPIO 21/22** (I2C) — do not repurpose.
+
 ### TTGO T-Call V1.3 — onboard (no wiring)
 
 | Signal | GPIO | Notes |

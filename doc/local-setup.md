@@ -100,7 +100,19 @@ Extension workflow:
 2. Select environment **`ttgo-t-call`**
 3. **Build** → **Upload** → **Monitor** (115200 baud) from the PlatformIO sidebar
 
-## Wiring for Step 2 (HX711 bench test)
+## Wiring
+
+![Wiring diagram: TTGO T-Call V1.3, HX711, load cell, setup button](tcall_hx711_wiring.svg)
+
+### TTGO T-Call V1.3 pinout
+
+Onboard SIM800L and reserved pins are marked on the diagram. **Do not use GPIO 21/22** (IP5306 I2C) or modem pins **4, 5, 23, 26, 27** for external sensors.
+
+![TTGO T-Call V1.3 pinout](T-Call.jpg)
+
+Official board repo: [LilyGO T-Call SIM800](https://github.com/xinyuan-lilygo/lilygo-t-call-sim800)
+
+### HX711 and load cell
 
 | HX711 | ESP32 (TTGO T-Call) |
 |-------|---------------------|
