@@ -87,6 +87,13 @@ constexpr float BATTERY_FULL_V = 4.20f;
 
 // HX711: channel A, gain 128, ~10 SPS (library default)
 constexpr uint8_t HX711_RAW_SAMPLES = 10;
+// After deep sleep the HX711 is power-cycled; its output only settles
+// ~400 ms after power-up, so discard the first conversions before measuring.
+constexpr uint8_t HX711_WARMUP_READS = 5;
+// HX711/load cell readings drift ~50 g during the first minutes after
+// power-up (self-heating). Scheduled reports wait this long since boot
+// before measuring so every report is taken at the same thermal state.
+constexpr unsigned long HX711_THERMAL_WARMUP_MS = 2UL * 60UL * 1000UL;
 constexpr uint8_t HX711_TARE_PREVIEW_COUNT = 5;
 constexpr uint8_t HX711_CAL_PREVIEW_COUNT = 7;
 constexpr uint8_t HX711_DISPLAY_MEDIAN_COUNT = 5;

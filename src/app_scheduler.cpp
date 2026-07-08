@@ -37,7 +37,34 @@ const char *appSchedulerWakeCauseName(WakeCause cause) {
   }
 }
 
+namespace {
+
+// Wait until the board has been powered HX711_THERMAL_WARMUP_MS so the
+// load cell reading is taken at a consistent thermal state. No-op when the
+// device has already been awake that long (e.g. after the bench window).
+bool waitForSensorWarmup() {
+  const unsigned long deadline = HX711_THERMAL_WARMUP_MS;
+  if (millis() >= deadline) {
+    return true;
+  }
+  Serial.printf("Sensor warm-up: measuring in %lus (setup button aborts)\n",
+                (deadline - millis()) / 1000UL);
+  while (millis() < deadline) {
+    if (setupButtonBreakRequested()) {
+      Serial.println(F("Setup button / serial — aborting warm-up"));
+      return false;
+    }
+    delay(50);
+  }
+  return true;
+}
+
+}  // namespace
+
 bool appSchedulerRunPublishCycle() {
+  if (!waitForSensorWarmup()) {
+    return false;
+  }
   for (uint8_t attempt = 1; attempt <= PUBLISH_MAX_ATTEMPTS; attempt++) {
     Serial.printf("Publish attempt %u/%u\n", attempt, PUBLISH_MAX_ATTEMPTS);
     if (mqttClientRunPublishTest(MODEM_NETWORK_TIMEOUT_MS,

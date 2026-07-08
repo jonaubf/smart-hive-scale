@@ -2,6 +2,7 @@
 
 #include <HX711.h>
 
+#include "config.h"
 #include "pins.h"
 
 namespace {
@@ -38,6 +39,15 @@ long medianSorted(long *values, uint8_t count) {
 bool weightSensorBegin() {
   scale.begin(PIN_HX711_DT, PIN_HX711_SCK);
   scale.set_gain(HX711_GAIN);
+
+  // HX711 output only settles ~400 ms after power-up (it is power-cycled by
+  // deep sleep); the first conversions are off and would corrupt averages.
+  long discard = 0;
+  for (uint8_t i = 0; i < HX711_WARMUP_READS; i++) {
+    if (!readSingle(discard)) {
+      break;
+    }
+  }
   return true;
 }
 
@@ -62,6 +72,8 @@ WeightSensorReading weightSensorReadRaw(uint8_t samples) {
   return result;
 }
 
+// Note: SCK is GPIO12, an ESP32 strapping pin (flash voltage). Do NOT hold it
+// high across deep sleep — a high level at wake reset can break booting.
 void weightSensorPowerDown() { scale.power_down(); }
 
 WeightSensorReading weightSensorReadRawMedian(uint8_t samples, uint8_t warmupReads) {
