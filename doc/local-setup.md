@@ -118,8 +118,14 @@ Official board repo: [LilyGO T-Call SIM800](https://github.com/xinyuan-lilygo/li
 |-------|---------------------|
 | VCC   | 3.3 V               |
 | GND   | GND                 |
-| DT    | GPIO 14             |
-| SCK   | GPIO 12             |
+| DT    | GPIO 33             |
+| SCK   | GPIO 32             |
+
+**Why GPIO 32/33?** They are adjacent on the header, RTC-capable, and have no ESP32 boot/strapping role (unlike GPIO 12). Firmware enables an internal pull-up on DT and holds SCK high across deep sleep so the HX711 stays powered down.
+
+**Power:** run the HX711 at **3.3 V** from the T-Call header. A 5 V supply with a resistor divider on DT only fixes the data line — SCK from the ESP32 (3.3 V) may not meet the HX711 high-level threshold at 5 V VCC. Use 3.3 V for both supply and logic unless the board has separate analog/digital rails.
+
+**Do not** add an external resistor divider on DT — firmware already enables `INPUT_PULLUP` on GPIO 33.
 
 | Load cell wire | HX711 | Notes (this project's cell) |
 |----------------|-------|-----------------------------|
@@ -172,6 +178,8 @@ Serial monitor at **115200 baud**. Commands:
 - From deep sleep, a **short button press** wakes into bench mode; the RTC timer wakes into a headless publish cycle.
 - During publish retries (`Publish failed — retry in 30s`), pressing the setup button or sending serial aborts and enters bench mode.
 - During network wait and MQTT connect, button/serial aborts between TCP attempts (each attempt up to **15 s**).
+- Before each scheduled publish, a **2-minute sensor warm-up** runs (thermal settling). Button/serial aborts it.
+- Deep sleep: HX711 SCK is held high, WiFi is fully stopped, modem powered off. Setup button (GPIO 13) wakes via ext0.
 
 ### Config portal (button or `portal` command)
 
@@ -227,14 +235,16 @@ MQTT payload also includes `wifi_connected`, `wifi_hostname`, `wifi_ip`, `wifi_r
 
 **Procedure (trade-scale mechanics):**
 
-1. Power on, wait **~60 s**
+1. Power on, wait **~10 s** (HX711 warm-up discard on boot)
 2. Empty platform, keep still → `tare`  
-   - 3 s settle, 5 readings (2 s apart)  
+   - Median of **20** consecutive samples (~2.5 s)  
    - Fails if spread > 500 counts (unstable)
 3. Place known weight, keep still → `cal 8` (your actual kg)  
-   - 2 s settle, 7 readings (1 s apart) — shorter window reduces creep while loaded  
+   - Same single-pass median; keep the weight still  
    - Fails if samples are too noisy
 4. Readings show `weight_kg` (instant), `stable_kg` (median of last 5), and `mqtt_payload=...`
+
+**Scheduled reports:** before measuring, the device waits **2 minutes** after boot for thermal settling (`Sensor warm-up: measuring in Ns` on serial). Skipped if the device has already been awake that long (e.g. after the 5-minute bench window). Setup button or serial aborts the wait.
 
 **Persistence:** stored in NVS flash (survives power off). `reset` clears it.
 

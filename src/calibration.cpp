@@ -53,30 +53,25 @@ long sampleSpread(long *values, uint8_t count) {
   return maxValue - minValue;
 }
 
-StableSampleResult readStableSamples(uint8_t count, unsigned long intervalMs,
-                                     unsigned long settleMs) {
+// Single pass: settle briefly, then take HX711_CAL_SAMPLES consecutive
+// conversions (~2 s at 10 SPS) and use their median.
+StableSampleResult readStableSamples() {
   StableSampleResult result{false, 0, 0};
-  if (count == 0) {
-    return result;
-  }
 
-  delay(settleMs);
+  delay(HX711_CAL_SETTLE_MS);
 
-  long values[HX711_CAL_PREVIEW_COUNT];
-  for (uint8_t i = 0; i < count; i++) {
-    WeightSensorReading reading = weightSensorReadRaw(HX711_RAW_SAMPLES);
+  long values[HX711_CAL_SAMPLES];
+  for (uint8_t i = 0; i < HX711_CAL_SAMPLES; i++) {
+    WeightSensorReading reading = weightSensorReadRaw(1);
     if (!reading.ok) {
       return result;
     }
     values[i] = reading.raw;
-    if (i + 1 < count) {
-      delay(intervalMs);
-    }
   }
 
   result.ok = true;
-  result.median = medianInPlace(values, count);
-  result.spread = sampleSpread(values, count);
+  result.median = medianInPlace(values, HX711_CAL_SAMPLES);
+  result.spread = sampleSpread(values, HX711_CAL_SAMPLES);
   return result;
 }
 
@@ -160,11 +155,9 @@ float calibrationWeightKgMedian(const float *weightsKg, uint8_t count) {
 }
 
 bool calibrationTare() {
-  Serial.printf("Tare: settle %lu ms, %u readings every %lu ms...\n", HX711_TARE_SETTLE_MS,
-                HX711_TARE_PREVIEW_COUNT, HX711_TARE_INTERVAL_MS);
+  Serial.printf("Tare: median of %u samples...\n", HX711_CAL_SAMPLES);
 
-  StableSampleResult sample = readStableSamples(HX711_TARE_PREVIEW_COUNT, HX711_TARE_INTERVAL_MS,
-                                                HX711_TARE_SETTLE_MS);
+  StableSampleResult sample = readStableSamples();
   if (!sample.ok) {
     return false;
   }
@@ -186,11 +179,9 @@ bool calibrationCalibrate(float knownKg) {
     return false;
   }
 
-  Serial.printf("Cal: settle %lu ms, %u readings every %lu ms...\n", HX711_CAL_SETTLE_MS,
-                HX711_CAL_PREVIEW_COUNT, HX711_CAL_INTERVAL_MS);
+  Serial.printf("Cal: median of %u samples...\n", HX711_CAL_SAMPLES);
 
-  StableSampleResult sample =
-      readStableSamples(HX711_CAL_PREVIEW_COUNT, HX711_CAL_INTERVAL_MS, HX711_CAL_SETTLE_MS);
+  StableSampleResult sample = readStableSamples();
   if (!sample.ok) {
     return false;
   }

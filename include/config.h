@@ -94,13 +94,11 @@ constexpr uint8_t HX711_WARMUP_READS = 5;
 // power-up (self-heating). Scheduled reports wait this long since boot
 // before measuring so every report is taken at the same thermal state.
 constexpr unsigned long HX711_THERMAL_WARMUP_MS = 2UL * 60UL * 1000UL;
-constexpr uint8_t HX711_TARE_PREVIEW_COUNT = 5;
-constexpr uint8_t HX711_CAL_PREVIEW_COUNT = 7;
+// Tare/calibrate: single pass — short settle, then median of these samples
+// (~2 s at 10 SPS).
+constexpr uint8_t HX711_CAL_SAMPLES = 20;
+constexpr unsigned long HX711_CAL_SETTLE_MS = 400;
 constexpr uint8_t HX711_DISPLAY_MEDIAN_COUNT = 5;
-constexpr unsigned long HX711_TARE_SETTLE_MS = 3000;
-constexpr unsigned long HX711_CAL_SETTLE_MS = 2000;
-constexpr unsigned long HX711_TARE_INTERVAL_MS = 2000;
-constexpr unsigned long HX711_CAL_INTERVAL_MS = 1000;
 constexpr unsigned long HX711_READ_INTERVAL_MS = 2000;
 
 // 4 transmissions per day

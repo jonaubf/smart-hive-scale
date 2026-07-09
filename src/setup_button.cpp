@@ -1,6 +1,8 @@
 #include "setup_button.h"
 
 #include <Arduino.h>
+#include <driver/rtc_io.h>
+#include <esp_sleep.h>
 
 #include "config.h"
 #include "pins.h"
@@ -18,7 +20,17 @@ unsigned long lastEdgeMs = 0;
 }  // namespace
 
 void setupButtonBegin() {
+  // Release RTC mux state left over from ext0 deep-sleep wakeup config.
+  rtc_gpio_deinit(static_cast<gpio_num_t>(PIN_SETUP_BUTTON));
   pinMode(PIN_SETUP_BUTTON, INPUT_PULLUP);
+}
+
+void setupButtonPrepareDeepSleepWakeup() {
+  const gpio_num_t buttonPin = static_cast<gpio_num_t>(PIN_SETUP_BUTTON);
+  rtc_gpio_deinit(buttonPin);
+  rtc_gpio_pullup_en(buttonPin);
+  rtc_gpio_pulldown_dis(buttonPin);
+  esp_sleep_enable_ext0_wakeup(buttonPin, 0);
 }
 
 // One-shot: returns true exactly once per 10s hold; re-arms on button release.

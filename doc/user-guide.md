@@ -75,9 +75,11 @@ show          # verify offset and scale
 
 **Tips**
 
-- Wait ~60 s after power-on before taring.
-- Keep the platform still during tare/cal; unstable readings fail on purpose.
+- Tare and calibrate each take ~2.5 s (median of 20 samples). Keep the platform still; unstable readings fail on purpose.
+- On a **scheduled wake**, the device waits **2 minutes** after boot before measuring (thermal settling). Bench mode or a prior long awake session skips this.
 - `stable_kg` in telemetry is a median of recent samples — use it for graphs and alerts.
+- Slow drift over hours (±50 g) is normal load-cell creep and temperature — track trends, not absolute grams.
+- HX711: **3.3 V** supply, DT on **GPIO 33**, SCK on **GPIO 32**. Do not run HX711 at 5 V with 3.3 V ESP32 logic unless levels are properly matched.
 - This is for **hive monitoring**, not certified trade weighing.
 
 ---
@@ -119,8 +121,9 @@ Portal sections: calibration, WiFi, GSM/APN, operating mode, MQTT broker, firmwa
 
 ### Normal operation (power)
 
-- **GSM:** modem and WiFi off between reports; only wakes for measure → publish → sleep.
-- **WiFi:** STA may stay up at home; device still deep-sleeps the ESP32 between cycles.
+- **GSM:** modem and WiFi off between reports; wakes for warm-up → measure → publish → sleep.
+- **WiFi:** STA may stay up at home during bench mode; scheduled cycles still deep-sleep the ESP32.
+- **Scheduled publish:** **2-minute sensor warm-up** after cold boot before the weight is read (skipped if already awake ≥2 min).
 - **Setup button short press** after deep sleep wakes the device for a **5-minute bench window** (serial + portal). Serial commands extend the window.
 - Serial `sleep` forces deep sleep immediately; `send` runs one publish cycle now.
 
@@ -352,8 +355,9 @@ Create via **Settings → Automations** or paste into `automations.yaml`.
 
 | Symptom | Check |
 |---------|--------|
-| `raw=not_ready` | HX711 wiring, 3.3 V, DT=14 SCK=12 |
-| Weight drifts / wrong sign | Re-tare; swap A+/A− if inverted |
+| `raw=not_ready` | HX711 wiring, 3.3 V supply, DT=33 SCK=32 |
+| Weight drifts / wrong sign | Re-tare; swap A+/A− if inverted; expect ±50 g/h thermal creep on bench |
+| Weight jumps after sleep | Fixed in firmware (HX711 warm-up + 2 min thermal delay before publish) |
 | No MQTT in HA | `mosquitto_sub` on broker; hive `send` or `mqtt` command |
 | GSM connect OK, no data in HA | Fixed in firmware — ensure latest build (modem TX drain) |
 | TLS fails on `mqtt` | `certs/ca.pem`, SAN = public IP, 8883 open, correct password |

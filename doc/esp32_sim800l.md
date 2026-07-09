@@ -12,11 +12,13 @@ Board used by Smart Hive Scale: ESP32-WROVER-B + SIM800L + IP5306 PMIC.
 
 | Connection | Pins |
 |------------|------|
-| HX711 DT | GPIO 14 |
-| HX711 SCK | GPIO 12 |
-| HX711 VCC / GND | 3.3 V / GND |
+| HX711 DT | GPIO 33 |
+| HX711 SCK | GPIO 32 |
+| HX711 VCC / GND | 3.3 V / GND (do not use 5 V unless logic levels are matched) |
 | Setup button | GPIO 13 ↔ GND (NO, internal pull-up) |
 | Battery sense | GPIO 35 (ADC, onboard) |
+
+GPIO **32/33** are used instead of 12/14: no boot strapping, RTC-capable SCK hold across deep sleep, internal pull-up on DT.
 
 **Reserved — do not use for sensors:** GPIO 4, 5, 21, 22, 23, 26, 27 (modem + PMIC).
 

@@ -42,7 +42,7 @@ See **[Local development setup](doc/local-setup.md)** for wiring, calibration, a
 ## Hardware
 
 - TTGO T-Call V1.3 + 2G SIM (nano)
-- YZC-1B 200 kg load cell + HX711
+- YZC-1B 200 kg load cell + HX711 (DT **GPIO 33**, SCK **GPIO 32**, 3.3 V)
 - Li-Ion battery, outdoor enclosure, GSM antenna
 - Setup button (GPIO 13 → GND)
 

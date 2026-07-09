@@ -133,13 +133,14 @@ A battery-powered field device that measures beehive weight and periodically rep
 
 ### Wake Cycle
 
-1. ESP32 wakes from deep sleep (RTC timer)
-2. Read battery voltage
-3. **If GSM mode:** power on SIM800L, register, attach GPRS, TLS to `MQTT_BROKER_HOST:8883`
-4. **If WiFi mode:** connect STA to saved SSID, MQTT to `MQTT_BROKER_WIFI_HOST:1883` (local LAN, no TLS)
-5. Read HX711 (multiple samples, median filter), publish JSON telemetry
-6. Disconnect MQTT; power off modem or WiFi as appropriate
-7. Enter deep sleep until next cycle
+1. ESP32 wakes from deep sleep (RTC timer or setup button)
+2. HX711 power-up discard (~0.5 s) then optional **2-minute thermal warm-up** (timer wake only; skipped if already awake ≥2 min)
+3. Read battery voltage
+4. **If GSM mode:** power on SIM800L, register, attach GPRS, TLS to `MQTT_BROKER_HOST:8883`
+5. **If WiFi mode:** connect STA to saved SSID, MQTT to broker LAN IP port **1883** (no TLS)
+6. Read HX711 (multiple samples, median filter), publish JSON telemetry
+7. Disconnect MQTT; power off modem; full WiFi shutdown; HX711 power-down (SCK held)
+8. Enter deep sleep until next cycle
 
 **Maintenance (config portal):** hold setup button **10 seconds** (or serial `portal`) → soft-AP `beekpr-{device_id}` at `http://192.168.4.1`. Portal is **session-only**; save & reboot returns to gsm/wifi mode. No deep sleep while portal is active.
 
@@ -330,8 +331,8 @@ SIM800L uses GPIO **26** (RX), **27** (TX), **4** (PWRKEY), **5** (RST), **23** 
 |-------|-------|
 | VCC | 3.3 V |
 | GND | GND |
-| DT (DOUT) | GPIO 14 |
-| SCK (PD_SCK) | GPIO 12 |
+| DT (DOUT) | GPIO 33 | Internal pull-up enabled in firmware |
+| SCK (PD_SCK) | GPIO 32 | Held high across deep sleep (RTC pad) |
 
 ### Setup button → ESP32
 

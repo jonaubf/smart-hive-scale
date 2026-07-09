@@ -9,6 +9,16 @@ void radioPowerDown() {
   // WiFi.softAP() (config portal in GSM mode) crashes with "Invalid mbox".
 }
 
+void radioDeepSleepPowerDown() {
+  if (WiFi.getMode() != WIFI_OFF) {
+    WiFi.disconnect(true, false);
+    delay(100);
+    esp_wifi_stop();
+    delay(50);
+  }
+  WiFi.mode(WIFI_OFF);
+}
+
 void radioPowerUpForPortal() {
   WiFi.persistent(false);
   if (WiFi.getMode() == WIFI_OFF) {

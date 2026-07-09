@@ -1,6 +1,7 @@
 #include "weight_sensor.h"
 
 #include <HX711.h>
+#include <driver/gpio.h>
 
 #include "config.h"
 #include "pins.h"
@@ -13,9 +14,23 @@ constexpr uint8_t HX711_MEDIAN_MAX_SAMPLES = 31;
 
 HX711 scale;
 
+// SCK high >60 µs powers the HX711 down; low powers it up. Output settles
+// ~400 ms after power-up.
+void powerCycle() {
+  scale.power_down();
+  delayMicroseconds(100);
+  scale.power_up();
+  delay(400);
+}
+
 bool readSingle(long &rawOut) {
   if (!scale.wait_ready_timeout(HX711_READY_TIMEOUT_MS)) {
-    return false;
+    // A wedged HX711 (noise glitch on SCK mid-conversion) recovers after a
+    // power cycle; give it one chance before reporting failure.
+    powerCycle();
+    if (!scale.wait_ready_timeout(HX711_READY_TIMEOUT_MS)) {
+      return false;
+    }
   }
   rawOut = scale.read();
   return true;
@@ -37,7 +52,14 @@ long medianSorted(long *values, uint8_t count) {
 }  // namespace
 
 bool weightSensorBegin() {
+  // Release the deep-sleep hold on SCK (set in weightSensorPowerDown) so the
+  // library can drive it low and power the HX711 back up.
+  gpio_hold_dis(static_cast<gpio_num_t>(PIN_HX711_SCK));
+
   scale.begin(PIN_HX711_DT, PIN_HX711_SCK);
+  // Pull-up keeps DOUT from floating between conversions and during modem/
+  // WiFi bursts — floating DOUT reads as noise.
+  pinMode(PIN_HX711_DT, INPUT_PULLUP);
   scale.set_gain(HX711_GAIN);
 
   // HX711 output only settles ~400 ms after power-up (it is power-cycled by
@@ -72,9 +94,13 @@ WeightSensorReading weightSensorReadRaw(uint8_t samples) {
   return result;
 }
 
-// Note: SCK is GPIO12, an ESP32 strapping pin (flash voltage). Do NOT hold it
-// high across deep sleep — a high level at wake reset can break booting.
-void weightSensorPowerDown() { scale.power_down(); }
+void weightSensorPowerDown() {
+  scale.power_down();
+  // Deep sleep resets GPIOs to inputs; without a hold SCK would float and the
+  // HX711 could wake back up mid-sleep. GPIO32 is an RTC pad.
+  gpio_hold_en(static_cast<gpio_num_t>(PIN_HX711_SCK));
+  gpio_deep_sleep_hold_en();
+}
 
 WeightSensorReading weightSensorReadRawMedian(uint8_t samples, uint8_t warmupReads) {
   WeightSensorReading result{false, 0};

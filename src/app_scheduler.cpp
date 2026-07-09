@@ -1,19 +1,16 @@
 #include "app_scheduler.h"
 
 #include <Arduino.h>
-#include <driver/rtc_io.h>
+#include <driver/uart.h>
 #include <esp_sleep.h>
 
 #include "config.h"
-#include "connectivity_mode.h"
 #include "device_settings.h"
 #include "modem_manager.h"
 #include "mqtt_client.h"
-#include "pins.h"
 #include "radio_manager.h"
 #include "setup_button.h"
 #include "weight_sensor.h"
-#include "wifi_manager.h"
 
 WakeCause appSchedulerWakeCause() {
   switch (esp_sleep_get_wakeup_cause()) {
@@ -100,20 +97,19 @@ void appSchedulerEnterDeepSleep() {
 
   weightSensorPowerDown();
   modemManagerPowerOff();
-  if (connectivityMode() == ConnectivityMode::WifiSta) {
-    wifiManagerDisconnect();
-  }
-  radioPowerDown();
+  radioDeepSleepPowerDown();
+
+  // Keep RTC domains on — improves ext0 button-wake reliability on IDF 5.x
+  // (see BeehiveScale SleepManager / ESP-IDF issue #9913).
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
 
   esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(intervalSec) * 1000000ULL);
-
-  // Setup button (GPIO 13 is RTC-capable): wake on press for maintenance.
-  const gpio_num_t buttonPin = static_cast<gpio_num_t>(PIN_SETUP_BUTTON);
-  rtc_gpio_pullup_en(buttonPin);
-  rtc_gpio_pulldown_dis(buttonPin);
-  esp_sleep_enable_ext0_wakeup(buttonPin, 0);
+  setupButtonPrepareDeepSleepWakeup();
 
   Serial.flush();
+  uart_wait_tx_idle_polling(UART_NUM_0);
   esp_deep_sleep_start();
   // esp_deep_sleep_start() should not return
   Serial.println(F("ERR deep sleep failed — restarting"));

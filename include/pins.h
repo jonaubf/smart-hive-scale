@@ -11,9 +11,11 @@ constexpr int PIN_MODEM_POWER = 23;
 constexpr int PIN_PMIC_SDA = 21;
 constexpr int PIN_PMIC_SCL = 22;
 
-// HX711 load cell ADC (GPIO 12+14 are adjacent on the header)
-constexpr int PIN_HX711_DT = 14;
-constexpr int PIN_HX711_SCK = 12;
+// HX711 load cell ADC. GPIO 32+33 are adjacent on the header, RTC-capable
+// (SCK can be held high across deep sleep) and have no boot/strapping role
+// (unlike GPIO 12, which selects flash voltage at reset).
+constexpr int PIN_HX711_DT = 33;
+constexpr int PIN_HX711_SCK = 32;
 
 // Battery voltage sense (ADC1, input-only)
 constexpr int PIN_BATTERY_ADC = 35;
