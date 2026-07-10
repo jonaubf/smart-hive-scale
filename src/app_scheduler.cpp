@@ -36,11 +36,11 @@ const char *appSchedulerWakeCauseName(WakeCause cause) {
 
 namespace {
 
-// Wait until the board has been powered HX711_THERMAL_WARMUP_MS so the
+// Wait until the board has been powered SCALE_THERMAL_WARMUP_MS so the
 // load cell reading is taken at a consistent thermal state. No-op when the
 // device has already been awake that long (e.g. after the bench window).
 bool waitForSensorWarmup() {
-  const unsigned long deadline = HX711_THERMAL_WARMUP_MS;
+  const unsigned long deadline = SCALE_THERMAL_WARMUP_MS;
   if (millis() >= deadline) {
     return true;
   }

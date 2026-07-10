@@ -26,7 +26,7 @@ Create a local secrets file:
 cp .env.example .env
 ```
 
-Edit `.env` with real MQTT credentials before builds that need them. Step 2 (HX711 bench test) does not use MQTT yet.
+Edit `.env` with real MQTT credentials before builds that need them. Step 2 (scale bench test) does not use MQTT yet.
 
 ### PlatformIO in a virtualenv (recommended)
 
@@ -102,7 +102,7 @@ Extension workflow:
 
 ## Wiring
 
-![Wiring diagram: TTGO T-Call V1.3, HX711, load cell, setup button](tcall_hx711_wiring.svg)
+![Wiring diagram: TTGO T-Call V1.3, NAU7802, DS18B20, load cell, setup button](tcall_nau7802_wiring.svg)
 
 ### TTGO T-Call V1.3 pinout
 
@@ -112,27 +112,35 @@ Onboard SIM800L and reserved pins are marked on the diagram. **Do not use GPIO 2
 
 Official board repo: [LilyGO T-Call SIM800](https://github.com/xinyuan-lilygo/lilygo-t-call-sim800)
 
-### HX711 and load cell
+### NAU7802 and load cell
 
-| HX711 | ESP32 (TTGO T-Call) |
-|-------|---------------------|
-| VCC   | 3.3 V               |
-| GND   | GND                 |
-| DT    | GPIO 33             |
-| SCK   | GPIO 32             |
+| NAU7802 | ESP32 (TTGO T-Call) |
+|---------|---------------------|
+| VIN     | 3.3 V               |
+| GND     | GND                 |
+| SCL     | GPIO 18             |
+| SDA     | GPIO 19             |
 
-**Why GPIO 32/33?** They are adjacent on the header, RTC-capable, and have no ESP32 boot/strapping role (unlike GPIO 12). Firmware enables an internal pull-up on DT and holds SCK high across deep sleep so the HX711 stays powered down.
+**Why GPIO 18/19?** The NAU7802 needs its own I2C bus — GPIO 21/22 are hard-wired to the onboard IP5306 PMIC. Firmware runs the chip at address **0x2A**, gain 128, 10 SPS, and puts it into register-controlled power-down (~200 nA) before deep sleep, so no GPIO holds are needed.
 
-**Power:** run the HX711 at **3.3 V** from the T-Call header. A 5 V supply with a resistor divider on DT only fixes the data line — SCK from the ESP32 (3.3 V) may not meet the HX711 high-level threshold at 5 V VCC. Use 3.3 V for both supply and logic unless the board has separate analog/digital rails.
+**Power:** 3.3 V from the T-Call header. Bridge excitation comes from the NAU7802's internal LDO (set to 3.0 V by firmware) — the load cell does not need a separate supply.
 
-**Do not** add an external resistor divider on DT — firmware already enables `INPUT_PULLUP` on GPIO 33.
+| Load cell wire | NAU7802 | Notes (this project's cell) |
+|----------------|---------|-----------------------------|
+| White          | E+      | `vref` on original scale PCB |
+| Black          | E−      | `gnd` on original scale PCB |
+| Green          | A+      | `nn` — swap with Red if sign is wrong |
+| Red            | A−      | `np` |
 
-| Load cell wire | HX711 | Notes (this project's cell) |
-|----------------|-------|-----------------------------|
-| White          | E+    | `vref` on original scale PCB |
-| Black          | E−    | `gnd` on original scale PCB |
-| Green          | A+    | `nn` — swap with Red if sign is wrong |
-| Red            | A−    | `np` |
+### DS18B20 scale temperature sensor
+
+| DS18B20 | ESP32 (TTGO T-Call) |
+|---------|---------------------|
+| VDD     | 3.3 V               |
+| GND     | GND                 |
+| DQ      | GPIO 25             |
+
+**Required:** a **4.7 kΩ** resistor from DQ to 3.3 V (OneWire pull-up). Glue the probe to the scale frame near the load cell — its reading is published as `temp_scale_c` for weight-drift analysis. If the sensor is missing, the firmware logs an error at boot and publishes `temp_scale_c: null`.
 
 ### Setup button (config portal)
 
@@ -179,7 +187,7 @@ Serial monitor at **115200 baud**. Commands:
 - During publish retries (`Publish failed — retry in 30s`), pressing the setup button or sending serial aborts and enters bench mode.
 - During network wait and MQTT connect, button/serial aborts between TCP attempts (each attempt up to **15 s**).
 - Before each scheduled publish, a **2-minute sensor warm-up** runs (thermal settling). Button/serial aborts it.
-- Deep sleep: HX711 SCK is held high, WiFi is fully stopped, modem powered off. Setup button (GPIO 13) wakes via ext0.
+- Deep sleep: NAU7802 is put into register power-down, WiFi is fully stopped, modem powered off. Setup button (GPIO 13) wakes via ext0.
 
 ### Config portal (button or `portal` command)
 
@@ -235,7 +243,7 @@ MQTT payload also includes `wifi_connected`, `wifi_hostname`, `wifi_ip`, `wifi_r
 
 **Procedure (trade-scale mechanics):**
 
-1. Power on, wait **~10 s** (HX711 warm-up discard on boot)
+1. Power on, wait **~10 s** (ADC warm-up discard on boot)
 2. Empty platform, keep still → `tare`  
    - Median of **20** consecutive samples (~2.5 s)  
    - Fails if spread > 500 counts (unstable)
@@ -248,7 +256,7 @@ MQTT payload also includes `wifi_connected`, `wifi_hostname`, `wifi_ip`, `wifi_r
 
 **Persistence:** stored in NVS flash (survives power off). `reset` clears it.
 
-**Note:** Replacing the scale’s original electronics with ESP32+HX711 voids trade certification. Use for hive monitoring, not legal sale weighing.
+**Note:** Replacing the scale’s original electronics with ESP32+NAU7802 voids trade certification. Use for hive monitoring, not legal sale weighing.
 
 ## Modem test (Step 4)
 
@@ -381,7 +389,7 @@ Uncalibrated:
 raw=108390 weight_kg=uncalibrated
 ```
 
-Without HX711 connected:
+Without the NAU7802 connected:
 
 ```
 raw=not_ready
@@ -395,5 +403,6 @@ raw=not_ready
 | `.venv` missing | Run the one-time venv setup commands above |
 | Upload fails / no port | Install CP210x driver; try another USB cable |
 | `WARNING: .env not found` | Run `cp .env.example .env` |
-| `raw=not_ready` always | Check 3.3 V, GND, DT/SCK pins; verify HX711 LED/power |
+| `raw=not_ready` always | Check 3.3 V, GND, SDA=19/SCL=18; look for `ERR NAU7802 not found` at boot |
+| `temp_scale_c=unavailable` | Check DS18B20 wiring (DQ=25) and the 4.7 kΩ pull-up to 3.3 V |
 | Build downloads fail | Check internet; retry `.venv/bin/pio run` |

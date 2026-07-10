@@ -11,7 +11,8 @@ struct CellTowerInfo {
   int cid;
 };
 
+// tempScaleC may be NAN (sensor missing/failed) — emitted as JSON null.
 String buildTelemetryJson(const char *deviceId, float weightKg, float stableKg,
-                          float batteryV, int batteryPct, int gsmRssi,
-                          const CellTowerInfo &cell, const WifiLinkInfo &wifi,
-                          unsigned long txIntervalSec);
+                          float tempScaleC, float batteryV, int batteryPct,
+                          int gsmRssi, const CellTowerInfo &cell,
+                          const WifiLinkInfo &wifi, unsigned long txIntervalSec);

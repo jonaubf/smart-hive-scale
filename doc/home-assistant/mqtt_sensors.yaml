@@ -51,6 +51,23 @@ mqtt:
           payload_not_available: offline
       device: *beekpr_hive_01_device
 
+    - name: Hive 01 Scale temperature
+      unique_id: beekpr_hive_01_temp_scale_c
+      default_entity_id: sensor.hive_01_scale_temperature
+      state_topic: beekpr/hive-01/state
+      value_template: >-
+        {{ value_json.temp_scale_c if value_json.temp_scale_c is not none else 'unknown' }}
+      unit_of_measurement: "°C"
+      state_class: measurement
+      device_class: temperature
+      icon: mdi:thermometer
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
     - name: Hive 01 Battery
       unique_id: beekpr_hive_01_battery_pct
       default_entity_id: sensor.hive_01_battery

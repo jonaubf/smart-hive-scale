@@ -15,6 +15,7 @@
 #include "mqtt_settings.h"
 #include "setup_button.h"
 #include "telemetry_payload.h"
+#include "temp_sensor.h"
 #include "weight_sensor.h"
 #include "wifi_manager.h"
 
@@ -209,7 +210,7 @@ void drainModemTxBeforeClose() {
 }
 
 String buildCurrentTelemetryJson() {
-  const WeightSensorReading reading = weightSensorReadRaw(HX711_RAW_SAMPLES);
+  const WeightSensorReading reading = weightSensorReadRaw(SCALE_RAW_SAMPLES);
   float weightKg = 0.0f;
   float stableKg = 0.0f;
   if (reading.ok && calibrationIsReady()) {
@@ -217,14 +218,16 @@ String buildCurrentTelemetryJson() {
     stableKg = weightKg;
   }
 
+  const float tempScaleC = tempSensorReadC();
   const float batteryV = batterySensorVoltage();
   const int batteryPct = batterySensorPercent();
   const ModemStatus &modem = modemManagerStatus();
   const CellTowerInfo cell = modem.cell.mcc > 0 ? modem.cell : gsmSettingsCellTower();
   const WifiLinkInfo wifi = wifiManagerStatus();
 
-  return buildTelemetryJson(DEVICE_ID, weightKg, stableKg, batteryV, batteryPct,
-                            modem.rssi, cell, wifi, settingsTxIntervalSec());
+  return buildTelemetryJson(DEVICE_ID, weightKg, stableKg, tempScaleC, batteryV,
+                            batteryPct, modem.rssi, cell, wifi,
+                            settingsTxIntervalSec());
 }
 
 bool mqttConnect(unsigned long timeoutMs) {

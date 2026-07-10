@@ -1,38 +1,53 @@
 #include "weight_sensor.h"
 
-#include <HX711.h>
-#include <driver/gpio.h>
+#include <SparkFun_Qwiic_Scale_NAU7802_Arduino_Library.h>
+#include <Wire.h>
 
 #include "config.h"
 #include "pins.h"
 
 namespace {
 
-constexpr uint8_t HX711_GAIN = 128;
-constexpr unsigned long HX711_READY_TIMEOUT_MS = 1500;
-constexpr uint8_t HX711_MEDIAN_MAX_SAMPLES = 31;
+constexpr unsigned long NAU7802_READY_TIMEOUT_MS = 1500;
+constexpr uint8_t NAU7802_MEDIAN_MAX_SAMPLES = 31;
 
-HX711 scale;
+NAU7802 scale;
+bool sensorPresent = false;
 
-// SCK high >60 µs powers the HX711 down; low powers it up. Output settles
-// ~400 ms after power-up.
+bool waitForConversion(unsigned long timeoutMs) {
+  const unsigned long deadline = millis() + timeoutMs;
+  while (!scale.available()) {
+    if (static_cast<long>(millis() - deadline) >= 0) {
+      return false;
+    }
+    delay(1);
+  }
+  return true;
+}
+
+// Registers are retained through power-down, but the analog front end needs
+// an internal recalibration after it comes back up.
 void powerCycle() {
-  scale.power_down();
-  delayMicroseconds(100);
-  scale.power_up();
-  delay(400);
+  scale.powerDown();
+  delay(10);
+  scale.powerUp();
+  scale.calibrateAFE();
+  delay(100);
 }
 
 bool readSingle(long &rawOut) {
-  if (!scale.wait_ready_timeout(HX711_READY_TIMEOUT_MS)) {
-    // A wedged HX711 (noise glitch on SCK mid-conversion) recovers after a
-    // power cycle; give it one chance before reporting failure.
+  if (!sensorPresent) {
+    return false;
+  }
+  if (!waitForConversion(NAU7802_READY_TIMEOUT_MS)) {
+    // A wedged NAU7802 (I2C glitch mid-conversion) recovers after a power
+    // cycle; give it one chance before reporting failure.
     powerCycle();
-    if (!scale.wait_ready_timeout(HX711_READY_TIMEOUT_MS)) {
+    if (!waitForConversion(NAU7802_READY_TIMEOUT_MS)) {
       return false;
     }
   }
-  rawOut = scale.read();
+  rawOut = scale.getReading();
   return true;
 }
 
@@ -52,20 +67,27 @@ long medianSorted(long *values, uint8_t count) {
 }  // namespace
 
 bool weightSensorBegin() {
-  // Release the deep-sleep hold on SCK (set in weightSensorPowerDown) so the
-  // library can drive it low and power the HX711 back up.
-  gpio_hold_dis(static_cast<gpio_num_t>(PIN_HX711_SCK));
+  Wire.begin(PIN_SCALE_I2C_SDA, PIN_SCALE_I2C_SCL);
 
-  scale.begin(PIN_HX711_DT, PIN_HX711_SCK);
-  // Pull-up keeps DOUT from floating between conversions and during modem/
-  // WiFi bursts — floating DOUT reads as noise.
-  pinMode(PIN_HX711_DT, INPUT_PULLUP);
-  scale.set_gain(HX711_GAIN);
+  sensorPresent = scale.begin(Wire);
+  if (!sensorPresent) {
+    Serial.println(F("ERR NAU7802 not found on I2C 0x2A — check wiring"));
+    return false;
+  }
 
-  // HX711 output only settles ~400 ms after power-up (it is power-cycled by
-  // deep sleep); the first conversions are off and would corrupt averages.
+  // Internal LDO excites the bridge; 3.0 V leaves headroom below the 3.3 V
+  // supply. Gain 128 matches the previous HX711 channel-A setup; 10 SPS
+  // trades speed for noise.
+  scale.setLDO(NAU7802_LDO_3V0);
+  scale.setGain(NAU7802_GAIN_128);
+  scale.setSampleRate(NAU7802_SPS_10);
+  // Re-calibrate the analog front end after changing LDO/gain/sample rate.
+  scale.calibrateAFE();
+
+  // The first conversions after power-up/AFE calibration are off and would
+  // corrupt averages (the chip is power-cycled by deep sleep).
   long discard = 0;
-  for (uint8_t i = 0; i < HX711_WARMUP_READS; i++) {
+  for (uint8_t i = 0; i < SCALE_WARMUP_READS; i++) {
     if (!readSingle(discard)) {
       break;
     }
@@ -80,32 +102,33 @@ WeightSensorReading weightSensorReadRaw(uint8_t samples) {
     samples = 1;
   }
 
-  if (!readSingle(result.raw)) {
-    return result;
+  long value = 0;
+  long long sum = 0;
+  for (uint8_t i = 0; i < samples; i++) {
+    if (!readSingle(value)) {
+      return result;
+    }
+    sum += value;
   }
 
-  if (samples == 1) {
-    result.ok = true;
-    return result;
-  }
-
-  result.raw = scale.read_average(samples);
+  result.raw = static_cast<long>(sum / samples);
   result.ok = true;
   return result;
 }
 
 void weightSensorPowerDown() {
-  scale.power_down();
-  // Deep sleep resets GPIOs to inputs; without a hold SCK would float and the
-  // HX711 could wake back up mid-sleep. GPIO32 is an RTC pad.
-  gpio_hold_en(static_cast<gpio_num_t>(PIN_HX711_SCK));
-  gpio_deep_sleep_hold_en();
+  if (!sensorPresent) {
+    return;
+  }
+  // Register-controlled power-down (~200 nA); survives ESP32 deep sleep
+  // because the setting lives in the NAU7802, not in a GPIO level.
+  scale.powerDown();
 }
 
 WeightSensorReading weightSensorReadRawMedian(uint8_t samples, uint8_t warmupReads) {
   WeightSensorReading result{false, 0};
 
-  if (samples == 0 || samples > HX711_MEDIAN_MAX_SAMPLES) {
+  if (samples == 0 || samples > NAU7802_MEDIAN_MAX_SAMPLES) {
     return result;
   }
 
@@ -116,7 +139,7 @@ WeightSensorReading weightSensorReadRawMedian(uint8_t samples, uint8_t warmupRea
     }
   }
 
-  long values[HX711_MEDIAN_MAX_SAMPLES];
+  long values[NAU7802_MEDIAN_MAX_SAMPLES];
   for (uint8_t i = 0; i < samples; i++) {
     if (!readSingle(values[i])) {
       return result;

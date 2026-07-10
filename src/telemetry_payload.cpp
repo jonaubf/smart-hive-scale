@@ -1,5 +1,7 @@
 #include "telemetry_payload.h"
 
+#include <math.h>
+
 #include "wifi_manager.h"
 
 namespace {
@@ -21,9 +23,9 @@ void jsonAppendEscapedString(String &json, const char *value) {
 }  // namespace
 
 String buildTelemetryJson(const char *deviceId, float weightKg, float stableKg,
-                          float batteryV, int batteryPct, int gsmRssi,
-                          const CellTowerInfo &cell, const WifiLinkInfo &wifi,
-                          unsigned long txIntervalSec) {
+                          float tempScaleC, float batteryV, int batteryPct,
+                          int gsmRssi, const CellTowerInfo &cell,
+                          const WifiLinkInfo &wifi, unsigned long txIntervalSec) {
   String json;
   json.reserve(384);
   json += "{";
@@ -33,6 +35,12 @@ String buildTelemetryJson(const char *deviceId, float weightKg, float stableKg,
   json += String(weightKg, 3);
   json += ",\"stable_kg\":";
   json += String(stableKg, 3);
+  json += ",\"temp_scale_c\":";
+  if (isnan(tempScaleC)) {
+    json += "null";
+  } else {
+    json += String(tempScaleC, 2);
+  }
   json += ",\"battery_v\":";
   json += String(batteryV, 3);
   json += ",\"battery_pct\":";

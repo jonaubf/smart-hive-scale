@@ -210,7 +210,7 @@ String buildSettingsJson() {
 }
 
 String buildWeightJson() {
-  WeightSensorReading reading = weightSensorReadRaw(HX711_RAW_SAMPLES);
+  WeightSensorReading reading = weightSensorReadRaw(SCALE_RAW_SAMPLES);
   String json = "{\"ok\":";
   if (!reading.ok) {
     json += "false}";

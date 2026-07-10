@@ -32,14 +32,15 @@ Home Assistant shows weight, battery, connectivity, and cell tower info on a sin
 | Item | Notes |
 |------|-------|
 | TTGO T-Call V1.3 | ESP32 + SIM800L + IP5306 PMIC |
-| YZC-1B 200 kg load cell + HX711 | Wired per [`local-setup.md`](local-setup.md) |
+| YZC-1B 200 kg load cell + NAU7802 | I2C ADC, wired per [`local-setup.md`](local-setup.md) |
+| DS18B20 temperature sensor | On the scale frame, GPIO 25 + 4.7 kΩ pull-up |
 | Li-Ion battery | 18650 or pack, 3000–6000 mAh |
 | 2G nano SIM | Data plan (Kyivstar default APN `internet`) |
 | GSM antenna | Outside the enclosure |
 | Setup button | NO push button: GPIO 13 ↔ GND |
 | IP65 enclosure | Outdoor mounting |
 
-![Wiring diagram](tcall_hx711_wiring.svg)
+![Wiring diagram](tcall_nau7802_wiring.svg)
 
 ![TTGO T-Call V1.3 pinout](T-Call.jpg)
 
@@ -78,8 +79,8 @@ show          # verify offset and scale
 - Tare and calibrate each take ~2.5 s (median of 20 samples). Keep the platform still; unstable readings fail on purpose.
 - On a **scheduled wake**, the device waits **2 minutes** after boot before measuring (thermal settling). Bench mode or a prior long awake session skips this.
 - `stable_kg` in telemetry is a median of recent samples — use it for graphs and alerts.
-- Slow drift over hours (±50 g) is normal load-cell creep and temperature — track trends, not absolute grams.
-- HX711: **3.3 V** supply, DT on **GPIO 33**, SCK on **GPIO 32**. Do not run HX711 at 5 V with 3.3 V ESP32 logic unless levels are properly matched.
+- Slow drift over hours (±50 g) is normal load-cell creep and temperature — track trends, not absolute grams. Use `temp_scale_c` (DS18B20 on the frame) to correlate drift with temperature.
+- NAU7802: **3.3 V** supply, SDA on **GPIO 19**, SCL on **GPIO 18** (I2C address 0x2A).
 - This is for **hive monitoring**, not certified trade weighing.
 
 ---
@@ -169,6 +170,7 @@ Example `device_id`: `hive-01` → topics `beekpr/hive-01/state` and `beekpr/hiv
   "device_id": "hive-01",
   "weight_kg": 47.32,
   "stable_kg": 47.29,
+  "temp_scale_c": 18.75,
   "battery_v": 3.87,
   "battery_pct": 78,
   "rssi": 26,
@@ -188,6 +190,7 @@ Example `device_id`: `hive-01` → topics `beekpr/hive-01/state` and `beekpr/hiv
 |-------|---------|
 | `weight_kg` | Instant weight |
 | `stable_kg` | Median-filtered weight (best for graphs) |
+| `temp_scale_c` | Scale-frame temperature from DS18B20 (`null` if sensor missing) |
 | `battery_v` / `battery_pct` | Battery status |
 | `rssi` | GSM signal 0–31 (`-1` when not on GSM) |
 | `wifi_*` | LAN status when in WiFi mode |
@@ -355,9 +358,10 @@ Create via **Settings → Automations** or paste into `automations.yaml`.
 
 | Symptom | Check |
 |---------|--------|
-| `raw=not_ready` | HX711 wiring, 3.3 V supply, DT=33 SCK=32 |
+| `raw=not_ready` | NAU7802 wiring, 3.3 V supply, SDA=19 SCL=18; check boot log for `ERR NAU7802 not found` |
+| `temp_scale_c=unavailable` | DS18B20 wiring (DQ=25) or missing 4.7 kΩ pull-up |
 | Weight drifts / wrong sign | Re-tare; swap A+/A− if inverted; expect ±50 g/h thermal creep on bench |
-| Weight jumps after sleep | Fixed in firmware (HX711 warm-up + 2 min thermal delay before publish) |
+| Weight jumps after sleep | Fixed in firmware (ADC warm-up + 2 min thermal delay before publish) |
 | No MQTT in HA | `mosquitto_sub` on broker; hive `send` or `mqtt` command |
 | GSM connect OK, no data in HA | Fixed in firmware — ensure latest build (modem TX drain) |
 | TLS fails on `mqtt` | `certs/ca.pem`, SAN = public IP, 8883 open, correct password |

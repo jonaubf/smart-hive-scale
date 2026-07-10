@@ -13,6 +13,6 @@ const char *appSchedulerWakeCauseName(WakeCause cause);
 // Returns true when the publish succeeded.
 bool appSchedulerRunPublishCycle();
 
-// Power down modem/WiFi/HX711 and enter deep sleep until the next
+// Power down modem/WiFi/NAU7802 and enter deep sleep until the next
 // tx interval (or setup button press). Does not return.
 void appSchedulerEnterDeepSleep();

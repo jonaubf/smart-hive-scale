@@ -53,15 +53,15 @@ long sampleSpread(long *values, uint8_t count) {
   return maxValue - minValue;
 }
 
-// Single pass: settle briefly, then take HX711_CAL_SAMPLES consecutive
+// Single pass: settle briefly, then take SCALE_CAL_SAMPLES consecutive
 // conversions (~2 s at 10 SPS) and use their median.
 StableSampleResult readStableSamples() {
   StableSampleResult result{false, 0, 0};
 
-  delay(HX711_CAL_SETTLE_MS);
+  delay(SCALE_CAL_SETTLE_MS);
 
-  long values[HX711_CAL_SAMPLES];
-  for (uint8_t i = 0; i < HX711_CAL_SAMPLES; i++) {
+  long values[SCALE_CAL_SAMPLES];
+  for (uint8_t i = 0; i < SCALE_CAL_SAMPLES; i++) {
     WeightSensorReading reading = weightSensorReadRaw(1);
     if (!reading.ok) {
       return result;
@@ -70,8 +70,8 @@ StableSampleResult readStableSamples() {
   }
 
   result.ok = true;
-  result.median = medianInPlace(values, HX711_CAL_SAMPLES);
-  result.spread = sampleSpread(values, HX711_CAL_SAMPLES);
+  result.median = medianInPlace(values, SCALE_CAL_SAMPLES);
+  result.spread = sampleSpread(values, SCALE_CAL_SAMPLES);
   return result;
 }
 
@@ -81,8 +81,8 @@ long maxAllowedSpread(long deltaFromOffset) {
 }
 
 void printVerifyTare() {
-  delay(HX711_READ_INTERVAL_MS);
-  WeightSensorReading reading = weightSensorReadRaw(HX711_RAW_SAMPLES);
+  delay(SCALE_READ_INTERVAL_MS);
+  WeightSensorReading reading = weightSensorReadRaw(SCALE_RAW_SAMPLES);
   if (!reading.ok) {
     Serial.println(F("verify=not_ready"));
     return;
@@ -136,7 +136,7 @@ float calibrationWeightKgMedian(const float *weightsKg, uint8_t count) {
     return NAN;
   }
 
-  float sorted[HX711_DISPLAY_MEDIAN_COUNT];
+  float sorted[SCALE_DISPLAY_MEDIAN_COUNT];
   for (uint8_t i = 0; i < count; i++) {
     sorted[i] = weightsKg[i];
   }
@@ -155,7 +155,7 @@ float calibrationWeightKgMedian(const float *weightsKg, uint8_t count) {
 }
 
 bool calibrationTare() {
-  Serial.printf("Tare: median of %u samples...\n", HX711_CAL_SAMPLES);
+  Serial.printf("Tare: median of %u samples...\n", SCALE_CAL_SAMPLES);
 
   StableSampleResult sample = readStableSamples();
   if (!sample.ok) {
@@ -179,7 +179,7 @@ bool calibrationCalibrate(float knownKg) {
     return false;
   }
 
-  Serial.printf("Cal: median of %u samples...\n", HX711_CAL_SAMPLES);
+  Serial.printf("Cal: median of %u samples...\n", SCALE_CAL_SAMPLES);
 
   StableSampleResult sample = readStableSamples();
   if (!sample.ok) {

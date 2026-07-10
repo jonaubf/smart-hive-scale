@@ -85,21 +85,25 @@ constexpr uint8_t BATTERY_ADC_SAMPLES = 16;
 constexpr float BATTERY_EMPTY_V = 3.30f;
 constexpr float BATTERY_FULL_V = 4.20f;
 
-// HX711: channel A, gain 128, ~10 SPS (library default)
-constexpr uint8_t HX711_RAW_SAMPLES = 10;
-// After deep sleep the HX711 is power-cycled; its output only settles
-// ~400 ms after power-up, so discard the first conversions before measuring.
-constexpr uint8_t HX711_WARMUP_READS = 5;
-// HX711/load cell readings drift ~50 g during the first minutes after
+// NAU7802: gain 128, 10 SPS, internal LDO 3.0 V for bridge excitation.
+constexpr uint8_t SCALE_RAW_SAMPLES = 10;
+// After deep sleep the NAU7802 is power-cycled; the first conversions after
+// power-up/AFE calibration are off, so discard them before measuring.
+constexpr uint8_t SCALE_WARMUP_READS = 5;
+// ADC/load cell readings drift ~50 g during the first minutes after
 // power-up (self-heating). Scheduled reports wait this long since boot
 // before measuring so every report is taken at the same thermal state.
-constexpr unsigned long HX711_THERMAL_WARMUP_MS = 2UL * 60UL * 1000UL;
+constexpr unsigned long SCALE_THERMAL_WARMUP_MS = 2UL * 60UL * 1000UL;
 // Tare/calibrate: single pass — short settle, then median of these samples
 // (~2 s at 10 SPS).
-constexpr uint8_t HX711_CAL_SAMPLES = 20;
-constexpr unsigned long HX711_CAL_SETTLE_MS = 400;
-constexpr uint8_t HX711_DISPLAY_MEDIAN_COUNT = 5;
-constexpr unsigned long HX711_READ_INTERVAL_MS = 2000;
+constexpr uint8_t SCALE_CAL_SAMPLES = 20;
+constexpr unsigned long SCALE_CAL_SETTLE_MS = 400;
+constexpr uint8_t SCALE_DISPLAY_MEDIAN_COUNT = 5;
+constexpr unsigned long SCALE_READ_INTERVAL_MS = 2000;
+
+// DS18B20: 12-bit conversion takes up to 750 ms; done synchronously once per
+// reading (weight publish or bench print), so latency is acceptable.
+constexpr uint8_t TEMP_SENSOR_RESOLUTION_BITS = 12;
 
 // 4 transmissions per day
 constexpr unsigned long WAKE_INTERVAL_SEC = 6UL * 60UL * 60UL;

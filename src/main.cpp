@@ -18,13 +18,14 @@
 #include "radio_manager.h"
 #include "setup_button.h"
 #include "telemetry_payload.h"
+#include "temp_sensor.h"
 #include "weight_sensor.h"
 #include "wifi_manager.h"
 
 namespace {
 
 String commandBuffer;
-float weightHistory[HX711_DISPLAY_MEDIAN_COUNT];
+float weightHistory[SCALE_DISPLAY_MEDIAN_COUNT];
 uint8_t weightHistoryCount = 0;
 // Bench window: only after setup-button wake (or WiFi power-on for home setup).
 // Serial commands extend it; stray UART noise does not.
@@ -64,8 +65,10 @@ void printBanner() {
   Serial.println();
   Serial.println(F("=== Smart Hive Scale ==="));
   Serial.printf("Device ID: %s\n", DEVICE_ID);
-  Serial.printf("HX711: channel A, gain 128\n");
-  Serial.printf("HX711 pins: DT=%d SCK=%d\n", PIN_HX711_DT, PIN_HX711_SCK);
+  Serial.printf("NAU7802: I2C 0x2A, gain 128, 10 SPS (SDA=%d SCL=%d)\n",
+                PIN_SCALE_I2C_SDA, PIN_SCALE_I2C_SCL);
+  Serial.printf("DS18B20: OneWire GPIO %d (4.7k pull-up to 3.3V)\n",
+                PIN_TEMP_ONEWIRE);
   Serial.printf("Setup button: GPIO %d (hold 10s for config portal)\n", PIN_SETUP_BUTTON);
   Serial.println(
       F("Commands: tare | cal <kg> | show | reset | setint <min> | setcell <mcc> <mnc> <lac> <cid>"));
@@ -79,15 +82,15 @@ void printBanner() {
 }
 
 void pushWeightSample(float weightKg) {
-  if (weightHistoryCount < HX711_DISPLAY_MEDIAN_COUNT) {
+  if (weightHistoryCount < SCALE_DISPLAY_MEDIAN_COUNT) {
     weightHistory[weightHistoryCount++] = weightKg;
     return;
   }
 
-  for (uint8_t i = 1; i < HX711_DISPLAY_MEDIAN_COUNT; i++) {
+  for (uint8_t i = 1; i < SCALE_DISPLAY_MEDIAN_COUNT; i++) {
     weightHistory[i - 1] = weightHistory[i];
   }
-  weightHistory[HX711_DISPLAY_MEDIAN_COUNT - 1] = weightKg;
+  weightHistory[SCALE_DISPLAY_MEDIAN_COUNT - 1] = weightKg;
 }
 
 void printReading(const WeightSensorReading &reading) {
@@ -105,11 +108,17 @@ void printReading(const WeightSensorReading &reading) {
   pushWeightSample(weightKg);
   const float stableKg =
       calibrationWeightKgMedian(weightHistory, weightHistoryCount);
+  const float tempScaleC = tempSensorReadC();
   const float batteryV = batterySensorVoltage();
   const int batteryPct = batterySensorPercent();
 
   Serial.printf("raw=%ld weight_kg=%.3f stable_kg=%.3f\n", reading.raw, weightKg,
                 stableKg);
+  if (isnan(tempScaleC)) {
+    Serial.println(F("temp_scale_c=unavailable"));
+  } else {
+    Serial.printf("temp_scale_c=%.2f\n", tempScaleC);
+  }
   Serial.printf("battery_v=%.3f battery_pct=%d\n", batteryV, batteryPct);
   const CellTowerInfo cell = gsmSettingsCellTower();
   const WifiLinkInfo wifi = wifiManagerStatus();
@@ -120,8 +129,9 @@ void printReading(const WeightSensorReading &reading) {
                   wifi.connected ? "yes" : "no",
                   wifi.ip[0] != '\0' ? wifi.ip : "-", wifi.rssi);
   }
-  const String payload = buildTelemetryJson(DEVICE_ID, weightKg, stableKg, batteryV, batteryPct,
-                                            gsmRssi, cell, wifi, settingsTxIntervalSec());
+  const String payload =
+      buildTelemetryJson(DEVICE_ID, weightKg, stableKg, tempScaleC, batteryV,
+                         batteryPct, gsmRssi, cell, wifi, settingsTxIntervalSec());
   Serial.printf("mqtt_payload=%s\n", payload.c_str());
 }
 
@@ -366,6 +376,7 @@ void setup() {
   gsmSettingsBegin();
   mqttSettingsBegin();
   weightSensorBegin();
+  tempSensorBegin();
   batterySensorBegin();
   calibrationBegin();
   setupButtonBegin();
@@ -444,8 +455,8 @@ void loop() {
     return;
   }
 
-  WeightSensorReading reading = weightSensorReadRaw(HX711_RAW_SAMPLES);
+  WeightSensorReading reading = weightSensorReadRaw(SCALE_RAW_SAMPLES);
   printReading(reading);
 
-  delay(HX711_READ_INTERVAL_MS);
+  delay(SCALE_READ_INTERVAL_MS);
 }
