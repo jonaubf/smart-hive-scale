@@ -25,12 +25,19 @@ void jsonAppendEscapedString(String &json, const char *value) {
 String buildTelemetryJson(const char *deviceId, float weightKg, float stableKg,
                           float tempScaleC, float batteryV, int batteryPct,
                           bool boostKeepOn, int gsmRssi, const CellTowerInfo &cell,
-                          const WifiLinkInfo &wifi, unsigned long txIntervalSec) {
+                          const WifiLinkInfo &wifi, unsigned long txIntervalSec,
+                          const String &reportTimeIso8601) {
   String json;
-  json.reserve(400);
+  json.reserve(420);
   json += "{";
   json += "\"device_id\":";
   jsonAppendEscapedString(json, deviceId);
+  json += ",\"report_time\":";
+  if (reportTimeIso8601.isEmpty()) {
+    json += "null";
+  } else {
+    jsonAppendEscapedString(json, reportTimeIso8601.c_str());
+  }
   json += ",\"weight_kg\":";
   json += String(weightKg, 3);
   json += ",\"stable_kg\":";

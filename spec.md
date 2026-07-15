@@ -173,6 +173,8 @@ Example `device_id`: `hive-01`
 
 ```json
 {
+  "device_id": "hive-01",
+  "report_time": "2026-07-15T13:33:25Z",
   "weight_kg": 47.32,
   "stable_kg": 47.29,
   "temp_scale_c": 18.75,
@@ -187,8 +189,7 @@ Example `device_id`: `hive-01`
   "cell_mcc": 255,
   "cell_mnc": 255,
   "cell_lac": -1,
-  "cell_cid": -1,
-  "device_id": "hive-01"
+  "cell_cid": -1
 }
 ```
 
@@ -206,6 +207,7 @@ No custom HA integration is required for v1. Use the built-in **MQTT integration
 
 | Entity | Source field | Platform | Notes |
 |--------|--------------|----------|-------|
+| Report time | `report_time` | `sensor` | `device_class: timestamp`; ISO8601 UTC from the DS3231 (or ESP32 system clock if no DS3231); `null` until a clock has synced at least once |
 | Hive weight | `weight_kg` | `sensor` | Primary; `state_class: measurement`, unit `kg` |
 | Hive weight (stable) | `stable_kg` | `sensor` | Filtered value; use for graphs/alerts |
 | Scale temperature | `temp_scale_c` | `sensor` | DS18B20 on frame; `null` if sensor missing |

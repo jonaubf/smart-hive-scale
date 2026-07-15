@@ -137,7 +137,8 @@ void printReading(const WeightSensorReading &reading) {
   }
   const String payload = buildTelemetryJson(
       DEVICE_ID, weightKg, stableKg, tempScaleC, batteryV, batteryPct,
-      ip5306BoostKeepOnOk(), gsmRssi, cell, wifi, settingsTxIntervalSec());
+      ip5306BoostKeepOnOk(), gsmRssi, cell, wifi, settingsTxIntervalSec(),
+      rtcClockNowIso8601());
   Serial.printf("mqtt_payload=%s\n", payload.c_str());
 }
 

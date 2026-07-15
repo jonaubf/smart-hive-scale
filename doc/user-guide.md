@@ -168,6 +168,7 @@ Example `device_id`: `hive-01` → topics `beekpr/hive-01/state` and `beekpr/hiv
 ```json
 {
   "device_id": "hive-01",
+  "report_time": "2026-07-15T13:33:25Z",
   "weight_kg": 47.32,
   "stable_kg": 47.29,
   "temp_scale_c": 18.75,
@@ -188,6 +189,7 @@ Example `device_id`: `hive-01` → topics `beekpr/hive-01/state` and `beekpr/hiv
 
 | Field | Meaning |
 |-------|---------|
+| `report_time` | ISO8601 UTC timestamp from the DS3231 (or ESP32 system clock if no DS3231 fitted); `null` until a clock has synced at least once — GSM mode syncs it automatically via NITZ/NTP, WiFi mode has no clock source yet |
 | `weight_kg` | Instant weight |
 | `stable_kg` | Median-filtered weight (best for graphs) |
 | `temp_scale_c` | Scale-frame temperature from DS18B20 (`null` if sensor missing) |

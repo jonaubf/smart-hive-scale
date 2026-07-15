@@ -14,6 +14,7 @@
 #include "ip5306.h"
 #include "modem_manager.h"
 #include "mqtt_settings.h"
+#include "rtc_clock.h"
 #include "setup_button.h"
 #include "telemetry_payload.h"
 #include "temp_sensor.h"
@@ -231,7 +232,7 @@ String buildCurrentTelemetryJson() {
 
   return buildTelemetryJson(DEVICE_ID, weightKg, stableKg, tempScaleC, batteryV,
                             batteryPct, boostKeepOn, modem.rssi, cell, wifi,
-                            settingsTxIntervalSec());
+                            settingsTxIntervalSec(), rtcClockNowIso8601());
 }
 
 bool mqttConnect(unsigned long timeoutMs) {

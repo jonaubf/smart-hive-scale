@@ -35,6 +35,21 @@ mqtt:
         model: Hive Weight Monitor
         configuration_url: http://beekpr-hive-01.local
 
+    - name: Hive 01 Report time
+      unique_id: beekpr_hive_01_report_time
+      default_entity_id: sensor.hive_01_report_time
+      state_topic: beekpr/hive-01/state
+      value_template: >-
+        {{ value_json.report_time if value_json.report_time is not none else 'unknown' }}
+      device_class: timestamp
+      icon: mdi:clock-check-outline
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
     - name: Hive 01 Weight (stable)
       unique_id: beekpr_hive_01_stable_kg
       default_entity_id: sensor.hive_01_weight_stable
