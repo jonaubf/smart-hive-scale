@@ -16,6 +16,7 @@
 #include "mqtt_settings.h"
 #include "pins.h"
 #include "radio_manager.h"
+#include "rtc_clock.h"
 #include "setup_button.h"
 #include "telemetry_payload.h"
 #include "temp_sensor.h"
@@ -69,11 +70,15 @@ void printBanner() {
                 PIN_SCALE_I2C_SDA, PIN_SCALE_I2C_SCL);
   Serial.printf("DS18B20: OneWire GPIO %d (4.7k pull-up to 3.3V)\n",
                 PIN_TEMP_ONEWIRE);
+  Serial.printf("IP5306: I2C 0x75 SDA=%d SCL=%d boost_keep_on=%s SYS_CTL0=0x%02X\n",
+                PIN_PMIC_SDA, PIN_PMIC_SCL,
+                ip5306BoostKeepOnOk() ? "yes" : "no", ip5306SysCtl0());
+  rtcClockShow();
   Serial.printf("Setup button: GPIO %d (hold 10s for config portal)\n", PIN_SETUP_BUTTON);
   Serial.println(
       F("Commands: tare | cal <kg> | show | reset | setint <min> | setcell <mcc> <mnc> <lac> <cid>"));
   Serial.println(
-      F("           setmode gsm|wifi | setwificred <ssid> <pass> | wificonn | modem | gprs | mqttls | mqtt | send | sleep | modemoff | portal | reboot"));
+      F("           setmode gsm|wifi | setwificred <ssid> <pass> | wificonn | modem | gprs | mqttls | mqtt | send | sleep | modemoff | i2cscan | portal | reboot"));
   Serial.println();
   connectivityShow();
   gsmSettingsShow();
@@ -119,7 +124,8 @@ void printReading(const WeightSensorReading &reading) {
   } else {
     Serial.printf("temp_scale_c=%.2f\n", tempScaleC);
   }
-  Serial.printf("battery_v=%.3f battery_pct=%d\n", batteryV, batteryPct);
+  Serial.printf("battery_v=%.3f battery_pct=%d boost_keep_on=%s\n", batteryV,
+                batteryPct, ip5306BoostKeepOnOk() ? "yes" : "no");
   const CellTowerInfo cell = gsmSettingsCellTower();
   const WifiLinkInfo wifi = wifiManagerStatus();
   const int gsmRssi =
@@ -129,9 +135,9 @@ void printReading(const WeightSensorReading &reading) {
                   wifi.connected ? "yes" : "no",
                   wifi.ip[0] != '\0' ? wifi.ip : "-", wifi.rssi);
   }
-  const String payload =
-      buildTelemetryJson(DEVICE_ID, weightKg, stableKg, tempScaleC, batteryV,
-                         batteryPct, gsmRssi, cell, wifi, settingsTxIntervalSec());
+  const String payload = buildTelemetryJson(
+      DEVICE_ID, weightKg, stableKg, tempScaleC, batteryV, batteryPct,
+      ip5306BoostKeepOnOk(), gsmRssi, cell, wifi, settingsTxIntervalSec());
   Serial.printf("mqtt_payload=%s\n", payload.c_str());
 }
 
@@ -161,6 +167,7 @@ void handleCommand(const String &line) {
     gsmSettingsShow();
     settingsShow();
     calibrationShow();
+    rtcClockShow();
     return;
   }
 
@@ -209,6 +216,11 @@ void handleCommand(const String &line) {
 
   if (line == "modemoff") {
     modemManagerPowerOff();
+    return;
+  }
+
+  if (line == "i2cscan") {
+    ip5306ScanBus();
     return;
   }
 
@@ -321,7 +333,7 @@ void handleCommand(const String &line) {
   }
 
   Serial.println(
-      F("ERR unknown command (tare | cal <kg> | show | reset | setint | setcell | setmode | setwificred | wificonn | modem | gprs | mqttls | mqtt | send | sleep | modemoff | portal | reboot)"));
+      F("ERR unknown command (tare | cal <kg> | show | reset | setint | setcell | setmode | setwificred | wificonn | modem | gprs | mqttls | mqtt | send | sleep | modemoff | i2cscan | portal | reboot)"));
 }
 
 // Escape hatch before a headless GSM publish cycle: the cycle blocks for
@@ -369,25 +381,51 @@ void pollSerialCommands() {
 
 void setup() {
   Serial.begin(115200);
+
+  const WakeCause wakeCause = appSchedulerWakeCause();
+
+  // Cheapest possible path first: an intermediate IP5306-keepalive pulse
+  // (see app_scheduler.cpp — battery deep sleep is split into short chunks
+  // so the PMIC's 5V boost never sees enough idle time to auto-shut-off).
+  // These happen every ~25s for hours, so skip NVS/sensor/radio init
+  // entirely and go straight back to sleep — full init here would turn the
+  // "sleep" into a near-continuous power draw and defeat the purpose. Only
+  // probe the DS3231 (cheap, ~ms) to tell a keepalive pulse apart from the
+  // DS3231-absent fallback case, where a Timer wake IS the scheduled report.
+  if (wakeCause == WakeCause::Timer) {
+    rtcClockBegin();
+    if (rtcClockIsPresent()) {
+      appSchedulerContinueKeepaliveSleep();
+      // does not return
+    }
+    // DS3231 absent: this Timer wake is the scheduled report (fallback
+    // mode, no chunking) — fall through to full init below.
+  }
+
   delay(1000);
 
   settingsBegin();
   connectivityBegin();
   gsmSettingsBegin();
   mqttSettingsBegin();
+
+  // PMIC on Wire/I2C0 GPIO 21/22 (LilyGO path). NAU7802 uses Wire1.
+  if (!ip5306EnsureBoostKeepOn()) {
+    Serial.println(F("WARN: battery deep sleep may shut the board off after ~32s"));
+  }
+  rtcClockBegin();  // idempotent — no-op if the fast path above already ran it
+
   weightSensorBegin();
   tempSensorBegin();
   batterySensorBegin();
   calibrationBegin();
   setupButtonBegin();
 
-  ip5306Begin();
-  ip5306SetBoostKeepOn(true);
-
-  const WakeCause wakeCause = appSchedulerWakeCause();
   Serial.printf("wake_cause=%s\n", appSchedulerWakeCauseName(wakeCause));
 
-  if (wakeCause == WakeCause::Timer) {
+  if (wakeCause == WakeCause::RtcAlarm || wakeCause == WakeCause::Timer) {
+    // Reaching here with Timer only happens via the DS3231-absent fallback
+    // above — RtcAlarm is the normal, precise "report is due" signal.
     runScheduledCycleAndSleep();
   }
 

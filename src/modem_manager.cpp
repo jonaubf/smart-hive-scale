@@ -222,8 +222,7 @@ void modemManagerBeginHardware() {
     return;
   }
 
-  ip5306Begin();
-  if (!ip5306SetBoostKeepOn(true)) {
+  if (!ip5306EnsureBoostKeepOn()) {
     Serial.println(F("WARN IP5306 boost keep-on failed"));
   }
 

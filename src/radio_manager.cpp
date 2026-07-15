@@ -3,6 +3,8 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 
+#include "config.h"
+
 void radioPowerDown() {
   WiFi.mode(WIFI_OFF);
   // Do not call esp_wifi_stop() — it tears down the lwIP tcpip mbox and later
@@ -14,7 +16,10 @@ void radioDeepSleepPowerDown() {
     WiFi.disconnect(true, false);
     delay(100);
     esp_wifi_stop();
-    delay(50);
+    // Let the supply recover from the teardown current spike before the
+    // caller continues into deep-sleep power-down — see
+    // RADIO_TEARDOWN_SETTLE_MS in config.h.
+    delay(RADIO_TEARDOWN_SETTLE_MS);
   }
   WiFi.mode(WIFI_OFF);
 }

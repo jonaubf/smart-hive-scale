@@ -13,6 +13,7 @@ include/build_env.h
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+compile_commands.json
 
 # OS / editor
 .DS_Store
@@ -20,3 +21,4 @@ include/build_env.h
 *.swo
 .idea/
 .cursor/
+.claude/

@@ -408,8 +408,7 @@ void maintenancePortalBegin(bool forceAp) {
   setCpuFrequencyMhz(160);
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   radioPowerUpForPortal();
-  ip5306Begin();
-  if (!ip5306SetBoostKeepOn(true)) {
+  if (!ip5306EnsureBoostKeepOn()) {
     Serial.println(F("WARN IP5306 boost keep-on failed"));
   }
   snprintf(apSsid, sizeof(apSsid), "beekpr-%s", DEVICE_ID);

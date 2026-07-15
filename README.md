@@ -47,7 +47,7 @@ See **[Local development setup](doc/local-setup.md)** for wiring, calibration, a
 - Li-Ion battery, outdoor enclosure, GSM antenna
 - Setup button (GPIO 13 → GND)
 
-![Wiring: T-Call, NAU7802, DS18B20, load cell, setup button](doc/tcall_nau7802_wiring.svg)
+![Wiring: T-Call, NAU7802, DS18B20, DS3231, load cell, setup button](doc/tcall_nau7802_wiring.svg)
 
 Pin map, mechanical notes, and full tables: [spec §10](spec.md#10-hardware-connections) and [local-setup wiring](doc/local-setup.md#wiring).
 

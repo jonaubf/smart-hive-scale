@@ -11,6 +11,7 @@
 #include "connectivity_mode.h"
 #include "device_settings.h"
 #include "gsm_settings.h"
+#include "ip5306.h"
 #include "modem_manager.h"
 #include "mqtt_settings.h"
 #include "setup_button.h"
@@ -221,12 +222,15 @@ String buildCurrentTelemetryJson() {
   const float tempScaleC = tempSensorReadC();
   const float batteryV = batterySensorVoltage();
   const int batteryPct = batterySensorPercent();
+  // Refresh keep-on and report the verified read-back — catches Wire/PMIC
+  // failures before the next deep sleep on battery.
+  const bool boostKeepOn = ip5306EnsureBoostKeepOn();
   const ModemStatus &modem = modemManagerStatus();
   const CellTowerInfo cell = modem.cell.mcc > 0 ? modem.cell : gsmSettingsCellTower();
   const WifiLinkInfo wifi = wifiManagerStatus();
 
   return buildTelemetryJson(DEVICE_ID, weightKg, stableKg, tempScaleC, batteryV,
-                            batteryPct, modem.rssi, cell, wifi,
+                            batteryPct, boostKeepOn, modem.rssi, cell, wifi,
                             settingsTxIntervalSec());
 }
 

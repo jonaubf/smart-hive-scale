@@ -24,10 +24,10 @@ void jsonAppendEscapedString(String &json, const char *value) {
 
 String buildTelemetryJson(const char *deviceId, float weightKg, float stableKg,
                           float tempScaleC, float batteryV, int batteryPct,
-                          int gsmRssi, const CellTowerInfo &cell,
+                          bool boostKeepOn, int gsmRssi, const CellTowerInfo &cell,
                           const WifiLinkInfo &wifi, unsigned long txIntervalSec) {
   String json;
-  json.reserve(384);
+  json.reserve(400);
   json += "{";
   json += "\"device_id\":";
   jsonAppendEscapedString(json, deviceId);
@@ -45,6 +45,8 @@ String buildTelemetryJson(const char *deviceId, float weightKg, float stableKg,
   json += String(batteryV, 3);
   json += ",\"battery_pct\":";
   json += String(batteryPct);
+  json += ",\"boost_keep_on\":";
+  json += boostKeepOn ? "true" : "false";
   json += ",\"rssi\":";
   json += String(gsmRssi);
   json += ",\"wifi_connected\":";

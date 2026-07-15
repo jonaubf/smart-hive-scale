@@ -102,7 +102,7 @@ Extension workflow:
 
 ## Wiring
 
-![Wiring diagram: TTGO T-Call V1.3, NAU7802, DS18B20, load cell, setup button](tcall_nau7802_wiring.svg)
+![Wiring diagram: TTGO T-Call, NAU7802, DS18B20, DS3231, load cell, setup button](tcall_nau7802_wiring.svg)
 
 ### TTGO T-Call V1.3 pinout
 
@@ -153,6 +153,39 @@ Wire a **normally-open (NO)** push button between **GPIO 13** and **GND**. The f
 
 **Hold the button for 10 seconds** to open the WiFi config portal (soft-AP). Release earlier to cancel.
 
+### DS3231 precision RTC (report scheduling)
+
+| DS3231 | ESP32 (TTGO T-Call) |
+|--------|---------------------|
+| VCC    | 3.3 V               |
+| GND    | GND                 |
+| SDA    | GPIO 21 (shares the IP5306 bus) |
+| SCL    | GPIO 22 (shares the IP5306 bus) |
+| SQW/INT | GPIO 14             |
+
+**V1.3 vs V1.4 gotcha:** GPIO 32/33 look free on V1.3 but are wired to the modem's DTR/RI lines on V1.4 —
+firmware never touches them, but they're still physically traced to the SIM800 module, so anything else wired
+there would conflict with the modem regardless of code. GPIO 14 avoids this on both revisions. V1.4 also adds
+an onboard LED on GPIO 13, the same pin already used for the setup button — not yet confirmed whether that's a
+real conflict.
+
+I2C address **0x68** — no conflict with the IP5306 (0x75). `SQW`/`INT` is open-drain (the module has its own
+pull-up); it wakes the ESP32 from deep sleep via `ext1` when the scheduled report alarm fires, so reports land
+on precise wall-clock time instead of drifting on the ESP32's own RC-oscillator timer over weeks of deep sleep.
+If it isn't detected at boot, firmware logs an error and falls back to the ESP32's internal timer for scheduling
+(still correct, just less precise, and without the IP5306 keepalive-chunk protection — see
+[spec](../CLAUDE.md) for why). Fit a CR2032 in the module's holder if it has one — the DS3231 keeps its own time
+and alarm state through a full power loss as long as the coin cell is good, which the ESP32's own RTC memory
+cannot do.
+
+**A brand-new/never-set module** will show `lost_power=yes` and a bogus `2000-01-01` date on `show` — this
+does **not** break scheduling (alarms match on hour:minute only, so a report interval still fires at the right
+relative time regardless of the date), but it's cosmetically wrong until synced. In **GSM mode**, firmware
+syncs the DS3231 from the ESP32's system clock automatically once it's plausible (after
+`modemManagerSyncClock()`'s NITZ/NTP-over-GPRS sync succeeds during the first successful publish) — no action
+needed, just let one publish cycle complete. **WiFi mode has no clock source yet**, so the DS3231 won't
+self-correct there until one is added.
+
 ## Calibration (Step 3)
 
 Serial monitor at **115200 baud**. Commands:
@@ -167,6 +200,7 @@ Serial monitor at **115200 baud**. Commands:
 | `setcell 255 255 1234 56789` | Set cell tower IDs manually (normally filled by `modem` command) |
 | `modem` | Power on SIM800L, register on network, print RSSI/operator/cell IDs |
 | `modemoff` | Power off the modem |
+| `i2cscan` | Scan the PMIC I2C bus (GPIO 21/22) for any responding address — diagnoses IP5306 "not found" errors |
 | `gprs` | Full GPRS test: register → attach GPRS → TCP to MQTT broker → disconnect |
 | `mqtt` | Full MQTT test: GPRS → TLS → publish state + availability to Mosquitto |
 | `setmode gsm` | Use cellular GPRS for MQTT (default; reboot to apply) |

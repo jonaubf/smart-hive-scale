@@ -118,5 +118,21 @@ constexpr unsigned long PUBLISH_RETRY_BASE_DELAY_MS = 30000UL;
 // Any serial input extends the window.
 constexpr unsigned long BENCH_STAY_AWAKE_MS = 5UL * 60UL * 1000UL;
 
+// On battery, deep sleep longer than ~32 s risks the IP5306 auto-cutting the
+// 5 V rail if its "keep boost on" register bit isn't actually held (some
+// clones ack the I2C write without the bit sticking). app_scheduler.cpp only
+// arms the ESP32's internal timer for this short window — waking to reset
+// the PMIC's own shutoff timer, independent of the DS3231-driven report
+// schedule — when the verified read-back says the bit didn't take; a
+// verified-good PMIC sleeps on the DS3231 alarm alone.
+constexpr unsigned long IP5306_KEEPALIVE_CHUNK_SEC = 25UL;
+
+// WiFi's radio teardown (esp_wifi_stop()) right before deep sleep draws a
+// brief current spike. Over USB this is invisible (USB backs the rail); on
+// battery it appears to brown out the board before it ever reaches its first
+// RTC wake. This settle window after teardown, before the rest of the
+// power-down sequence continues, is an experiment to let the supply recover.
+constexpr unsigned long RADIO_TEARDOWN_SETTLE_MS = 500UL;
+
 constexpr const char *MQTT_TOPIC_STATE = "beekpr/" DEVICE_ID "/state";
 constexpr const char *MQTT_TOPIC_AVAILABILITY = "beekpr/" DEVICE_ID "/availability";

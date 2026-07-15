@@ -98,6 +98,21 @@ mqtt:
           payload_not_available: offline
       device: *beekpr_hive_01_device
 
+    - name: Hive 01 Boost keep-on
+      unique_id: beekpr_hive_01_boost_keep_on
+      default_entity_id: binary_sensor.hive_01_boost_keep_on
+      state_topic: beekpr/hive-01/state
+      value_template: "{{ value_json.boost_keep_on }}"
+      payload_on: "true"
+      payload_off: "false"
+      icon: mdi:power-plug-battery
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
     - name: Hive 01 GSM signal
       unique_id: beekpr_hive_01_rssi
       default_entity_id: sensor.hive_01_gsm_rssi

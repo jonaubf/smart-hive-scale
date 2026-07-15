@@ -311,7 +311,7 @@ reboot
 
 ## 10. Hardware Connections
 
-![Wiring diagram: T-Call, NAU7802, DS18B20, load cell, setup button](doc/tcall_nau7802_wiring.svg)
+![Wiring diagram: T-Call, NAU7802, DS18B20, DS3231, load cell, setup button](doc/tcall_nau7802_wiring.svg)
 
 ### TTGO T-Call V1.3 pinout
 

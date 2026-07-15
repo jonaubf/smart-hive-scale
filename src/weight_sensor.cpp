@@ -67,9 +67,10 @@ long medianSorted(long *values, uint8_t count) {
 }  // namespace
 
 bool weightSensorBegin() {
-  Wire.begin(PIN_SCALE_I2C_SDA, PIN_SCALE_I2C_SCL);
+  // Wire1 = dedicated bus for the scale ADC (Wire/I2C0 is reserved for IP5306).
+  Wire1.begin(PIN_SCALE_I2C_SDA, PIN_SCALE_I2C_SCL);
 
-  sensorPresent = scale.begin(Wire);
+  sensorPresent = scale.begin(Wire1);
   if (!sensorPresent) {
     Serial.println(F("ERR NAU7802 not found on I2C 0x2A — check wiring"));
     return false;
