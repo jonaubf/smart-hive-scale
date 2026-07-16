@@ -113,7 +113,6 @@ bool appSchedulerRunPublishCycle() {
 
 void appSchedulerEnterDeepSleep() {
   const unsigned long intervalSec = settingsTxIntervalSec();
-  Serial.printf("Entering deep sleep, next report in %lus\n", intervalSec);
 
   ip5306EnsureBoostKeepOn();
 
@@ -123,7 +122,9 @@ void appSchedulerEnterDeepSleep() {
     // clock whenever one is available (GSM mode syncs it during MQTT
     // connect); no-ops until the system clock itself is plausible.
     rtcClockSyncFromSystemTimeIfNeeded();
-    rtcClockSetAlarmIn(intervalSec);
+    Serial.printf("Entering deep sleep, next report at next %lus wall-clock boundary\n",
+                  intervalSec);
+    rtcClockSetNextAlignedAlarm(intervalSec);
     armShortTimer = !ip5306BoostKeepOnOk();
     if (armShortTimer) {
       Serial.printf(
@@ -131,8 +132,10 @@ void appSchedulerEnterDeepSleep() {
           IP5306_KEEPALIVE_CHUNK_SEC);
     }
   } else {
-    Serial.println(
-        F("ERR DS3231 not found — falling back to internal timer, no IP5306 keepalive protection"));
+    Serial.printf(
+        "ERR DS3231 not found — falling back to internal timer, next report in %lus "
+        "(not wall-clock aligned, no IP5306 keepalive protection)\n",
+        intervalSec);
   }
 
   weightSensorPowerDown();

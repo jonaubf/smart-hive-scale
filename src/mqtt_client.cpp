@@ -213,13 +213,16 @@ void drainModemTxBeforeClose() {
   }
 }
 
-// Weight/temp/battery snapshot, captured before any modem/WiFi activity.
-// GSM registration, GPRS attach, and the TLS handshake all draw current
-// spikes (SIM800 TX bursts up to ~2A) on the same shared supply the NAU7802's
-// bridge excitation and analog front end run from — sampling mid-conversion
-// during one of those spikes can corrupt a reading. Capturing first, before
-// the radio does anything, keeps the measurement clean regardless of what
-// the connect/publish sequence does afterward.
+// Weight/temp/battery/clock snapshot, captured before any modem/WiFi
+// activity. GSM registration, GPRS attach, and the TLS handshake all draw
+// current spikes (SIM800 TX bursts up to ~2A) on the same shared supply the
+// NAU7802's bridge excitation runs from — sampling mid-conversion, or
+// mid-I2C-transaction for the DS3231 read, during one of those spikes can
+// corrupt a reading (confirmed in the field 2026-07-17: a garbled
+// report_time with an out-of-range month/day/minute, read while the modem
+// was active). Capturing everything first, before the radio does anything,
+// keeps every reading clean regardless of what the connect/publish sequence
+// does afterward.
 struct SensorSnapshot {
   float weightKg = 0.0f;
   float stableKg = 0.0f;
@@ -227,6 +230,7 @@ struct SensorSnapshot {
   float batteryV = 0.0f;
   int batteryPct = 0;
   bool boostKeepOn = false;
+  String reportTimeIso8601;
 };
 
 SensorSnapshot captureSensorSnapshot() {
@@ -242,6 +246,7 @@ SensorSnapshot captureSensorSnapshot() {
   // Refresh keep-on and report the verified read-back — catches Wire/PMIC
   // failures before the next deep sleep on battery.
   snap.boostKeepOn = ip5306EnsureBoostKeepOn();
+  snap.reportTimeIso8601 = rtcClockNowIso8601();
   return snap;
 }
 
@@ -255,7 +260,7 @@ String buildTelemetryJsonFromSnapshot(const SensorSnapshot &snap) {
 
   return buildTelemetryJson(DEVICE_ID, snap.weightKg, snap.stableKg, snap.tempScaleC,
                             snap.batteryV, snap.batteryPct, snap.boostKeepOn, modem.rssi,
-                            cell, wifi, settingsTxIntervalSec(), rtcClockNowIso8601());
+                            cell, wifi, settingsTxIntervalSec(), snap.reportTimeIso8601);
 }
 
 bool mqttConnect(unsigned long timeoutMs) {

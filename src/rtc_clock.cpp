@@ -19,6 +19,15 @@ bool beginAttempted = false;
 // both modules agree on what counts as plausible.
 constexpr time_t PLAUSIBLE_TIME_THRESHOLD = 1672531200;
 
+// Guards against emitting a malformed timestamp from a corrupted read (a
+// live I2C transaction can glitch — e.g. during a modem current spike on
+// the shared supply — and decode to an out-of-calendar-range field, not
+// just a wrong-but-valid-looking one).
+bool isPlausibleCalendar(int year, int month, int day, int hour, int minute, int second) {
+  return year >= 2023 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31 &&
+        hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 && second >= 0 && second <= 59;
+}
+
 }  // namespace
 
 void rtcClockBegin() {
@@ -44,12 +53,28 @@ void rtcClockBegin() {
 
 bool rtcClockIsPresent() { return present; }
 
-bool rtcClockSetAlarmIn(uint32_t secondsFromNow) {
+bool rtcClockSetNextAlignedAlarm(uint32_t intervalSec) {
   if (!present) {
     return false;
   }
 
-  const DateTime target = rtc.now() + TimeSpan(static_cast<int32_t>(secondsFromNow));
+  // Wall-clock-aligned, not "intervalSec from now": e.g. a 1h interval fires
+  // at :00 every hour, not at whatever minute the previous cycle happened to
+  // finish at. DS3231_A2_Hour only matches hour:minute (no seconds, no
+  // date), so the alignment only needs minutes-since-midnight arithmetic —
+  // any date works in the DateTime below, it's never compared.
+  const DateTime now = rtc.now();
+  uint32_t intervalMin = intervalSec / 60;
+  if (intervalMin == 0) {
+    intervalMin = 1;  // defensive floor; settings never actually go this low
+  }
+  const uint32_t minutesSinceMidnight = static_cast<uint32_t>(now.hour()) * 60 + now.minute();
+  const uint32_t nextBoundary = (minutesSinceMidnight / intervalMin + 1) * intervalMin;
+  const uint32_t targetMinuteOfDay = nextBoundary % 1440;
+  const uint8_t targetHour = static_cast<uint8_t>(targetMinuteOfDay / 60);
+  const uint8_t targetMinute = static_cast<uint8_t>(targetMinuteOfDay % 60);
+
+  const DateTime target(now.year(), now.month(), now.day(), targetHour, targetMinute, 0);
   rtc.clearAlarm(2);
   if (!rtc.setAlarm2(target, DS3231_A2_Hour)) {
     Serial.println(F("ERR DS3231 setAlarm2 failed"));
@@ -94,8 +119,11 @@ String rtcClockNowIso8601() {
 
   if (present) {
     const DateTime now = rtc.now();
-    if (now.year() < 2023) {
-      return String();  // never synced — still the power-on-reset default (~2000)
+    // Covers both "never synced" (power-on-reset default ~2000) and a
+    // corrupted read decoding to an out-of-range field.
+    if (!isPlausibleCalendar(now.year(), now.month(), now.day(), now.hour(), now.minute(),
+                             now.second())) {
+      return String();
     }
     snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02dZ", now.year(), now.month(),
             now.day(), now.hour(), now.minute(), now.second());
@@ -108,8 +136,14 @@ String rtcClockNowIso8601() {
   }
   struct tm parts;
   gmtime_r(&systemTime, &parts);
-  snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02dZ", parts.tm_year + 1900,
-          parts.tm_mon + 1, parts.tm_mday, parts.tm_hour, parts.tm_min, parts.tm_sec);
+  const int year = parts.tm_year + 1900;
+  const int month = parts.tm_mon + 1;
+  if (!isPlausibleCalendar(year, month, parts.tm_mday, parts.tm_hour, parts.tm_min,
+                           parts.tm_sec)) {
+    return String();
+  }
+  snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02dZ", year, month, parts.tm_mday,
+          parts.tm_hour, parts.tm_min, parts.tm_sec);
   return String(buf);
 }
 

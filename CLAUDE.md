@@ -73,11 +73,15 @@ Publish cycle (`appSchedulerRunPublishCycle`, in `app_scheduler.cpp`): 2-minute 
 already awake that long) → read NAU7802 + DS18B20 + battery → connect (GSM: SIM800L register → GPRS attach → TLS
 MQTT :8883; WiFi: STA connect → plain MQTT :1883) → publish `state` + `availability` → disconnect. Retries with
 backoff up to `PUBLISH_MAX_ATTEMPTS`; setup button or serial input aborts into bench mode at any wait point.
-Sensor readings are captured as a `SensorSnapshot` (`mqtt_client.cpp::captureSensorSnapshot()`) *before* any
-modem/WiFi activity, deliberately — GSM registration, GPRS attach, and the TLS handshake all draw current spikes
-(SIM800 TX bursts up to ~2A) on the same shared supply the NAU7802's bridge excitation runs from, and sampling
-mid-conversion during one of those spikes can corrupt a reading (fixed 2026-07-17; it previously sampled weight
-*after* connecting). Network-status fields (rssi, cell tower, WiFi link) are read separately, after connecting,
+Sensor readings — weight, temp, battery, and the `report_time` timestamp — are captured as a `SensorSnapshot`
+(`mqtt_client.cpp::captureSensorSnapshot()`) *before* any modem/WiFi activity, deliberately — GSM registration,
+GPRS attach, and the TLS handshake all draw current spikes (SIM800 TX bursts up to ~2A) on the same shared
+supply the NAU7802's bridge excitation and the DS3231's I2C bus run from, and sampling (or reading the RTC)
+mid-spike can corrupt the result (fixed 2026-07-17; it previously sampled weight *and* read the RTC *after*
+connecting — the RTC half of this was only caught after a field report showed a garbled `report_time` with an
+out-of-range month/day/minute, decoded from a glitched I2C read). `rtcClockNowIso8601()` also validates every
+field is in-calendar-range before formatting, so a future glitch degrades to `report_time: null` instead of a
+malformed string. Network-status fields (rssi, cell tower, WiFi link) are read separately, after connecting,
 since those only exist once actually on the network.
 
 Before every deep sleep: NAU7802 → register power-down, WiFi fully stopped, modem powered off,
@@ -88,11 +92,15 @@ Before every deep sleep: NAU7802 → register power-down, WiFi fully stopped, mo
 A DS3231 (I2C 0x68, shares the IP5306's bus on GPIO 21/22) drives the report schedule via its
 alarm output (`PIN_RTC_ALARM`, `ext1` deep-sleep wake) so reports land on precise wall-clock time
 instead of drifting on the ESP32's own RC-oscillator timer. `appSchedulerEnterDeepSleep()`
-reprograms the alarm (`rtcClockSetAlarmIn()`, Alarm2/minute precision) to fire
-`settingsTxIntervalSec()` from the DS3231's own current time on every real sleep entry. If the
-DS3231 isn't found at boot, `rtc_clock` logs an error and `app_scheduler` falls back to sleeping
-the full interval on the ESP32's internal timer in one shot, unchunked — see the `Timer`
-`WakeCause` note above.
+reprograms the alarm (`rtcClockSetNextAlignedAlarm()`, Alarm2/minute precision) on every real sleep
+entry to fire at the *next wall-clock boundary* `settingsTxIntervalSec()` apart — e.g. a 1h interval
+always fires at :00, not "1h from whenever this cycle happened to finish" (fixed 2026-07-17; the
+original version anchored to "now", so the exact minute it fired at slowly wandered based on how
+long each cycle's connect/publish took). Alignment is to midnight, so intervals that evenly divide
+1440 minutes (30, 60, 360, ...) land on round clock times; others still fire on a consistent
+schedule, just not necessarily round numbers. If the DS3231 isn't found at boot, `rtc_clock` logs
+an error and `app_scheduler` falls back to sleeping the full interval on the ESP32's internal timer
+in one shot from "now" (unaligned, unchunked) — see the `Timer` `WakeCause` note above.
 
 A never-set DS3231 boots reporting `lost_power=true` and its power-on-reset epoch — cosmetically
 wrong but harmless to scheduling (Alarm2 matches hour:minute only, not the date). Before

@@ -13,9 +13,12 @@
 void rtcClockBegin();
 bool rtcClockIsPresent();
 
-// Programs Alarm2 (minute precision) to fire secondsFromNow from the
-// DS3231's own current time. Returns false if not present.
-bool rtcClockSetAlarmIn(uint32_t secondsFromNow);
+// Programs Alarm2 (minute precision) to fire at the next wall-clock
+// occurrence of a boundary intervalSec apart — e.g. intervalSec=3600 fires
+// at the next :00, not "3600s from whenever this was called". Aligned to
+// midnight, so intervals that evenly divide 1440 minutes (30, 60, 360, ...)
+// land on round clock times. Returns false if not present.
+bool rtcClockSetNextAlignedAlarm(uint32_t intervalSec);
 
 // Writes the ESP32 system clock (UTC) into the DS3231, but only once the
 // system clock itself looks plausible (post 2023-01-01) — modemManagerSyncClock()
