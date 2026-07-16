@@ -1,5 +1,7 @@
 #include "mqtt_client.h"
 
+#include <math.h>
+
 #include <PubSubClient.h>
 #include <SSLClient.h>
 #include <WiFi.h>
@@ -211,28 +213,49 @@ void drainModemTxBeforeClose() {
   }
 }
 
-String buildCurrentTelemetryJson() {
-  const WeightSensorReading reading = weightSensorReadRaw(SCALE_RAW_SAMPLES);
+// Weight/temp/battery snapshot, captured before any modem/WiFi activity.
+// GSM registration, GPRS attach, and the TLS handshake all draw current
+// spikes (SIM800 TX bursts up to ~2A) on the same shared supply the NAU7802's
+// bridge excitation and analog front end run from — sampling mid-conversion
+// during one of those spikes can corrupt a reading. Capturing first, before
+// the radio does anything, keeps the measurement clean regardless of what
+// the connect/publish sequence does afterward.
+struct SensorSnapshot {
   float weightKg = 0.0f;
   float stableKg = 0.0f;
-  if (reading.ok && calibrationIsReady()) {
-    weightKg = calibrationWeightKg(reading.raw);
-    stableKg = weightKg;
-  }
+  float tempScaleC = NAN;
+  float batteryV = 0.0f;
+  int batteryPct = 0;
+  bool boostKeepOn = false;
+};
 
-  const float tempScaleC = tempSensorReadC();
-  const float batteryV = batterySensorVoltage();
-  const int batteryPct = batterySensorPercent();
+SensorSnapshot captureSensorSnapshot() {
+  SensorSnapshot snap;
+  const WeightSensorReading reading = weightSensorReadRaw(SCALE_RAW_SAMPLES);
+  if (reading.ok && calibrationIsReady()) {
+    snap.weightKg = calibrationWeightKg(reading.raw);
+    snap.stableKg = snap.weightKg;
+  }
+  snap.tempScaleC = tempSensorReadC();
+  snap.batteryV = batterySensorVoltage();
+  snap.batteryPct = batterySensorPercent();
   // Refresh keep-on and report the verified read-back — catches Wire/PMIC
   // failures before the next deep sleep on battery.
-  const bool boostKeepOn = ip5306EnsureBoostKeepOn();
+  snap.boostKeepOn = ip5306EnsureBoostKeepOn();
+  return snap;
+}
+
+// Network-status fields (rssi, cell tower, WiFi link) can only be read once
+// connected, so this stays a separate step from the sensor snapshot above —
+// called after ensureNetwork()/mqttConnect() succeed.
+String buildTelemetryJsonFromSnapshot(const SensorSnapshot &snap) {
   const ModemStatus &modem = modemManagerStatus();
   const CellTowerInfo cell = modem.cell.mcc > 0 ? modem.cell : gsmSettingsCellTower();
   const WifiLinkInfo wifi = wifiManagerStatus();
 
-  return buildTelemetryJson(DEVICE_ID, weightKg, stableKg, tempScaleC, batteryV,
-                            batteryPct, boostKeepOn, modem.rssi, cell, wifi,
-                            settingsTxIntervalSec(), rtcClockNowIso8601());
+  return buildTelemetryJson(DEVICE_ID, snap.weightKg, snap.stableKg, snap.tempScaleC,
+                            snap.batteryV, snap.batteryPct, snap.boostKeepOn, modem.rssi,
+                            cell, wifi, settingsTxIntervalSec(), rtcClockNowIso8601());
 }
 
 bool mqttConnect(unsigned long timeoutMs) {
@@ -398,6 +421,10 @@ bool mqttClientRunGsmTlsSocketTest(unsigned long networkTimeoutMs, unsigned long
 
 bool mqttClientRunPublishTest(unsigned long networkTimeoutMs,
                               unsigned long mqttConnectTimeoutMs) {
+  // Sample weight/temp/battery before touching the modem/WiFi — see
+  // SensorSnapshot's comment for why this ordering matters.
+  const SensorSnapshot snapshot = captureSensorSnapshot();
+
   if (!ensureNetwork(networkTimeoutMs)) {
     return false;
   }
@@ -415,7 +442,7 @@ bool mqttClientRunPublishTest(unsigned long networkTimeoutMs,
     return false;
   }
 
-  const String payload = buildCurrentTelemetryJson();
+  const String payload = buildTelemetryJsonFromSnapshot(snapshot);
   const bool stateOk = mqttPublishPayload(MQTT_TOPIC_STATE, payload, false);
   const bool availOk =
       mqttPublishPayload(MQTT_TOPIC_AVAILABILITY, F("online"), true);
