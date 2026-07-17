@@ -77,10 +77,16 @@
 #endif
 
 // Battery ADC defaults for TTGO T-Call.
-// Vbat is typically divided before ADC input (2:1 on many boards).
+// Vbat is nominally divided 2:1 before the ADC input, but the naive
+// raw-to-voltage conversion below doesn't use ESP32's factory ADC
+// calibration, and real divider resistors have their own tolerance — so the
+// nominal 2.0 ratio measured ~6.6% low against a multimeter on this unit
+// (reported 3.85V vs. actual 4.103V). Single-point-calibrated against that
+// reading (2.0 * 4.103/3.85) rather than assumed from the nominal resistor
+// values; re-derive the same way if you swap boards or resistors.
 constexpr float BATTERY_ADC_REF_V = 3.3f;
 constexpr float BATTERY_ADC_MAX = 4095.0f;
-constexpr float BATTERY_DIVIDER_RATIO = 2.0f;
+constexpr float BATTERY_DIVIDER_RATIO = 2.1314f;
 constexpr uint8_t BATTERY_ADC_SAMPLES = 16;
 constexpr float BATTERY_EMPTY_V = 3.30f;
 constexpr float BATTERY_FULL_V = 4.20f;
