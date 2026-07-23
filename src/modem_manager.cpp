@@ -425,11 +425,15 @@ bool modemManagerSyncClock() {
     return false;
   }
 
-  // Skip if the RTC already holds a plausible date (later than 2023-01-01).
-  if (time(nullptr) > 1672531200) {
-    return true;
-  }
-
+  // Deliberately re-syncs every call, not just once: the ESP32's own system
+  // clock free-runs on its internal (uncalibrated) RTC oscillator through
+  // each multi-hour deep sleep, and rtcClockSyncFromSystemTimeIfNeeded()
+  // trusts this clock as the DS3231's source of truth every cycle. An
+  // earlier "skip if already plausible" check here meant only the very
+  // first sync was ever real — every cycle after that pushed an increasingly
+  // stale, uncorrected clock into the DS3231, observed in the field
+  // 2026-07-23 as a steady ~35s/cycle drift (fixed). NITZ is normally free
+  // (cached from network registration), so this doesn't add real cost.
   int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
   float tzHours = 0.0f;
   bool got = modem.getNetworkTime(&year, &month, &day, &hour, &minute, &second,

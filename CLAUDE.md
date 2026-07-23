@@ -108,7 +108,14 @@ reprogramming the alarm, `appSchedulerEnterDeepSleep()` calls `rtcClockSyncFromS
 which writes the ESP32's system clock into the DS3231 once that clock itself is plausible —
 currently only `modemManagerSyncClock()` (GSM mode, NITZ/NTP over GPRS, called during
 `modemManagerEnsureGprs()`) ever sets it via `settimeofday()`. WiFi mode has no clock source yet,
-so a DS3231 paired with a WiFi-only device won't self-correct.
+so a DS3231 paired with a WiFi-only device won't self-correct. `modemManagerSyncClock()`
+deliberately re-syncs from NITZ/NTP on *every* call, not just the first (fixed 2026-07-23) — it
+used to skip re-syncing once the system clock looked "plausible" (past 2023-01-01), but since the
+device spends ~99% of each cycle in deep sleep, the system clock in between real syncs is
+dominated by the ESP32's own uncalibrated internal RTC oscillator, not the DS3231. Combined with
+`rtcClockSyncFromSystemTimeIfNeeded()` trusting that same "plausible" clock as authoritative every
+cycle, this silently re-contaminated the DS3231 with an increasingly stale, drifting time every
+sleep cycle — observed in the field as a steady ~35s/cycle drift that only ever grew.
 
 Separately, some IP5306 clones auto-cut the 5V boost rail after ~32s under near-zero load (i.e.
 exactly what ESP32 deep sleep looks like), and on top of that some units are entirely unreachable
