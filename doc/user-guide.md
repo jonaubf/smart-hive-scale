@@ -2,6 +2,12 @@
 
 End-to-end guide: install the hive scale, calibrate weight, connect MQTT, and view everything in Home Assistant under **one device per hive**.
 
+**Hardware rework in progress:** this guide describes the **TTGO T-Call** hive scale that's actually deployed today
+(single load cell, one NAU7802). The project is moving to a discrete **ESP32-WROOM-32** build with **4 corner load
+cells** behind a PCA9548A I2C mux — see [spec.md](../spec.md) for that target architecture. It isn't built or
+flashed anywhere yet, so every instruction below (wiring, calibration, payload fields) is still the accurate,
+current procedure; this guide will be rewritten once the rework actually ships.
+
 **Related docs**
 
 | Topic | Document |
@@ -48,6 +54,9 @@ Full wiring tables and pin notes: [`local-setup.md` — Wiring](local-setup.md#w
 
 Mount the load cell in **compression** between a fixed base and a top plate under the hive. Constrain lateral movement so the cell only sees vertical load.
 
+**Target rework:** future hives will use 4 corner-mounted load cells instead of one central cell — see
+[spec.md §10](../spec.md#10-hardware-connections) for the mounting and wiring approach once that's built.
+
 ---
 
 ## 3. Weight calibration
@@ -61,7 +70,7 @@ Calibration is stored in flash and survives power loss. Do this once per hive (r
 3. In **Weight calibration**:
    - Empty platform, keep still → **Tare (empty scale)**.
    - Place a **known weight** (e.g. 8 kg) → enter kg → **Calibrate**.
-4. Live reading should match the known weight within ~0.1–0.5 kg.
+4. Live reading should match the known weight within ~0.01–0.1 kg.
 5. **Save settings and reboot** if you changed other settings too.
 
 ### Option B — USB serial (bench)
@@ -82,6 +91,9 @@ show          # verify offset and scale
 - Slow drift over hours (±50 g) is normal load-cell creep and temperature — track trends, not absolute grams. Use `temp_scale_c` (DS18B20 on the frame) to correlate drift with temperature.
 - NAU7802: **3.3 V** supply, SDA on **GPIO 19**, SCL on **GPIO 18** (I2C address 0x2A).
 - This is for **hive monitoring**, not certified trade weighing.
+- **Target rework:** the 4-corner build calibrates differently — tare each corner independently, then derive one
+  shared scale factor from a single centered known weight summed across all 4 (spec.md §10). Not available yet;
+  `tare`/`cal` above remain single-channel until that firmware lands.
 
 ---
 
@@ -198,6 +210,10 @@ Example `device_id`: `hive-01` → topics `beekpr/hive-01/state` and `beekpr/hiv
 | `wifi_*` | LAN status when in WiFi mode |
 | `cell_*` | Last known cell tower IDs |
 | `tx_interval_sec` | Seconds between scheduled reports |
+
+**Target rework:** the 4-corner build will add `corner1_kg`..`corner4_kg` fields (one per mux channel) alongside
+`weight_kg`/`stable_kg`, which stay the summed total for dashboard compatibility — see spec.md §7. Not in the
+payload yet.
 
 ### Broker checklist
 

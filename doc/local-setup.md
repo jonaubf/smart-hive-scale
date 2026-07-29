@@ -2,6 +2,13 @@
 
 Instructions for building and flashing Smart Hive Scale firmware on your machine.
 
+**Hardware rework in progress:** everything below describes the **TTGO T-Call V1.3/V1.4** board that the
+current firmware actually targets. The project is moving to a discrete **ESP32-WROOM-32** build with a
+standalone SIM800L and **4 corner load cells** behind a PCA9548A I2C mux — see [spec.md](../spec.md) §10 for
+that target wiring/GPIO map and calibration procedure. None of it is implemented yet, so build/flash/wiring
+steps here remain the accurate ones to follow until the rework lands; don't mix pin numbers or commands from
+spec.md's target architecture into a T-Call board, or vice versa.
+
 ## Prerequisites
 
 - **TTGO T-Call V1.3** board (USB data cable — not charge-only)
@@ -174,7 +181,7 @@ pull-up); it wakes the ESP32 from deep sleep via `ext1` when the scheduled repor
 on precise wall-clock time instead of drifting on the ESP32's own RC-oscillator timer over weeks of deep sleep.
 If it isn't detected at boot, firmware logs an error and falls back to the ESP32's internal timer for scheduling
 (still correct, just less precise, and without the IP5306 keepalive-chunk protection — see
-[spec](../CLAUDE.md) for why). Fit a CR2032 in the module's holder if it has one — the DS3231 keeps its own time
+[CLAUDE.md](../CLAUDE.md) for why). Fit a CR2032 in the module's holder if it has one — the DS3231 keeps its own time
 and alarm state through a full power loss as long as the coin cell is good, which the ESP32's own RTC memory
 cannot do.
 

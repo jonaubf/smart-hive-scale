@@ -2,6 +2,13 @@
 
 Board used by Smart Hive Scale: ESP32-WROVER-B + SIM800L + IP5306 PMIC.
 
+**Hardware rework in progress:** this describes the T-Call's *onboard* SIM800L, which the current firmware
+still targets. The target architecture is a discrete **ESP32-WROOM-32** with a **standalone** SIM800L module
+(own RST/UART2 wiring, **4.2 V** supply + bulk cap, no PMIC — **not** 5 V, SIM800L's VBAT max is
+4.5 V per its datasheet; this board has **no `PWRKEY` pin** — it's tied to GND internally, so power
+control is a GPIO-switched rail instead) — see [spec.md](../spec.md) §10. Not yet implemented; the
+pinout below stays accurate for the T-Call until the rework lands.
+
 ## Pinout
 
 ![TTGO T-Call V1.3 pinout](T-Call.jpg)

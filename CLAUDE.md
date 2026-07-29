@@ -4,10 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Firmware for **Smart Hive Scale** — a battery-powered ESP32 (TTGO T-Call V1.3, ESP32-WROVER-B + SIM800L) beehive
-weight monitor. Reads a load cell via NAU7802, wakes on an RTC schedule, and publishes JSON telemetry to Home
-Assistant over MQTT — either TLS/8883 via 2G GPRS (field hives) or plain/1883 over WiFi (hive at home). Deep-sleeps
-between reports to conserve battery. PlatformIO + Arduino framework, no OS.
+Firmware for **Smart Hive Scale** — a battery-powered ESP32 beehive weight monitor. Wakes on an RTC schedule,
+reads load cell(s) via NAU7802, and publishes JSON telemetry to Home Assistant over MQTT — either TLS/8883 via
+2G GPRS (field hives) or plain/1883 over WiFi (hive at home). Deep-sleeps between reports to conserve battery.
+PlatformIO + Arduino framework, no OS.
+
+**Hardware rework in progress:** the code in this repo (and everything below in this file) still describes the
+**TTGO T-Call V1.3/V1.4** board (ESP32-WROVER-B + SIM800L + IP5306 PMIC, single load cell) — that's what's
+actually built and running today, and this section stays accurate for anyone working on it as-is. The *target*
+architecture is a discrete build — bare ESP32-WROOM-32, standalone SIM800L, TP4056 + CR-SJ5530 power chain, and
+**4 corner load cells** behind a PCA9548A I2C mux — fully specified in [spec.md](spec.md) §2/§6/§10, not yet
+implemented in code. Read spec.md first to see which one you're actually working on; don't assume the T-Call
+specifics below (IP5306, single NAU7802 bus, GPIO map) carry over to the rework without checking.
 
 Full requirements/architecture/BOM/wiring live in [spec.md](spec.md) — read it for anything not covered here.
 End-user/operator docs are in `doc/` (see README's doc table). This file is for firmware development only.
@@ -143,6 +151,10 @@ Two layers of defense, both keyed off one honest signal — `ip5306BoostKeepOnOk
 
 ## Module map (`src/` + `include/`, one .cpp/.h pair each)
 
+This reflects the current T-Call-based code. In the discrete rework (spec.md), `ip5306` goes away
+entirely, a new `i2c_mux` module drives the PCA9548A, and `weight_sensor`/`calibration` become
+multi-channel (4 corners, one shared span factor — see spec.md §10 calibration procedure).
+
 | Module | Responsibility |
 |---|---|
 | `app_scheduler` | Orchestrates the wake cycle above; owns deep sleep / retry logic |
@@ -181,6 +193,10 @@ primary way to exercise it without a full field cycle: `tare`, `cal <kg>`, `show
 `mqttls`, `mqtt`, `send`, `sleep`, `modemoff`, `portal`, `reboot`. Full behavior/expected-output reference:
 [doc/local-setup.md](doc/local-setup.md).
 
+`tare`/`cal <kg>` above are today's single-channel behavior. In the discrete rework these become
+per-corner + shared-span operations (spec.md §10 calibration procedure) — expect new command syntax
+(e.g. a corner argument) once that firmware lands, not a drop-in replacement of today's commands.
+
 ## Working on this codebase
 
 - Firmware only — no test framework. Verify changes on real hardware via serial monitor + bench commands above.
@@ -189,7 +205,9 @@ primary way to exercise it without a full field cycle: `tare`, `cal <kg>`, `show
   (21,22) pins. **On V1.4 boards, GPIO 32/33 are also modem DTR/RI (not wired at all on V1.3 — this bit us once:
   `PIN_RTC_ALARM` was originally picked as GPIO 32 before that was known) and GPIO 13 has an onboard LED that may
   or may not conflict with `PIN_SETUP_BUTTON`, which already uses it** — don't assume a pin is free from the
-  V1.3 reservations alone.
+  V1.3 reservations alone. **None of these T-Call reservations apply to the discrete rework's bare ESP32-WROOM-32**
+  (no onboard modem/PMIC at all) — see spec.md §10 for that board's GPIO map instead; don't carry these
+  T-Call-specific avoidances over to the new hardware without checking whether they're still relevant.
 - Persisted config (anything the maintenance portal or a `set*` serial command writes) goes in NVS via a
   `*_settings`-style module, not `config.h` defines — those are compile-time fallbacks only.
 - Never commit `.env`, `certs/ca.pem`, or `include/build_env.h`/`include/ca_pem_embed.h` — all gitignored, and

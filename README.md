@@ -4,6 +4,10 @@ Battery-powered beehive weight monitor for remote apiaries. An ESP32 reads a loa
 
 Built for **TTGO T-Call V1.3** (ESP32 + SIM800L), NAU7802 + 200 kg load cell, DS18B20 scale temperature sensor, deep-sleep power management, and a web config portal for calibration and settings without reflashing.
 
+**Hardware rework in progress:** the project is moving to a discrete **ESP32-WROOM-32** build with a standalone
+SIM800L and **4 corner load cells** behind a PCA9548A I2C mux — see [spec.md](spec.md) for the target
+architecture. It isn't built yet; everything below still describes the T-Call hardware actually running today.
+
 ## Features
 
 - Weight measurement with tare/calibration (serial or web portal)
@@ -50,6 +54,12 @@ See **[Local development setup](doc/local-setup.md)** for wiring, calibration, a
 ![Wiring: T-Call, NAU7802, DS18B20, DS3231, load cell, setup button](doc/tcall_nau7802_wiring.svg)
 
 Pin map, mechanical notes, and full tables: [spec §10](spec.md#10-hardware-connections) and [local-setup wiring](doc/local-setup.md#wiring).
+
+**Target rework** (not built yet): bare ESP32-WROOM-32, standalone SIM800L, TP4056 + dual CR-SJ5530 power chain,
+and 4 corner load cells behind a PCA9548A I2C mux — see [spec §10](spec.md#10-hardware-connections) and the
+target wiring diagram below.
+
+![Target wiring: ESP32-WROOM-32, 4× load cell/NAU7802 via PCA9548A mux, DS3231, DS18B20, SIM800L, power chain](doc/smart-apiary-scale-schematic.svg)
 
 ## License
 
