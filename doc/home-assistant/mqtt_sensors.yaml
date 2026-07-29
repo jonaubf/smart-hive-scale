@@ -11,11 +11,9 @@
 # Prerequisites: MQTT integration connected to local Mosquitto on 127.0.0.1:1883.
 # The hive must publish JSON to beekpr/hive-01/state (see doc/user-guide.md).
 #
-# Hardware rework in progress: this file matches today's TTGO T-Call payload (single load cell,
-# weight_kg/stable_kg only). The discrete ESP32-WROOM-32 + 4-corner-load-cell rework (spec.md) will
-# add corner1_kg..corner4_kg fields — see the commented-out block below the "Weight (stable)" sensor
-# for ready-to-enable entities once firmware actually publishes them. Uncommenting them now would
-# just leave 4 permanently-unavailable entities, since the fields don't exist in the payload yet.
+# Matches the discrete ESP32-WROOM-32 + 4-corner-load-cell firmware (spec.md §7): per-corner
+# corner1_kg..corner4_kg diagnostics alongside the summed weight_kg/stable_kg. For the retired
+# TTGO T-Call payload (single cell, boost_keep_on field), use this file from the tcall-v1 git tag.
 
 mqtt:
   sensor:
@@ -72,71 +70,75 @@ mqtt:
           payload_not_available: offline
       device: *beekpr_hive_01_device
 
-    # --- Target rework (spec.md) — not live yet, payload has no corner*_kg fields until the
-    # discrete ESP32-WROOM-32 + 4-corner-load-cell build ships. Uncomment once it does.
-    # - name: Hive 01 Corner 1 weight
-    #   unique_id: beekpr_hive_01_corner1_kg
-    #   default_entity_id: sensor.hive_01_corner1_weight
-    #   state_topic: beekpr/hive-01/state
-    #   value_template: "{{ value_json.corner1_kg }}"
-    #   unit_of_measurement: kg
-    #   state_class: measurement
-    #   device_class: weight
-    #   icon: mdi:scale-bathroom
-    #   expire_after: 45000
-    #   availability:
-    #     - topic: beekpr/hive-01/availability
-    #       payload_available: online
-    #       payload_not_available: offline
-    #   device: *beekpr_hive_01_device
-    #
-    # - name: Hive 01 Corner 2 weight
-    #   unique_id: beekpr_hive_01_corner2_kg
-    #   default_entity_id: sensor.hive_01_corner2_weight
-    #   state_topic: beekpr/hive-01/state
-    #   value_template: "{{ value_json.corner2_kg }}"
-    #   unit_of_measurement: kg
-    #   state_class: measurement
-    #   device_class: weight
-    #   icon: mdi:scale-bathroom
-    #   expire_after: 45000
-    #   availability:
-    #     - topic: beekpr/hive-01/availability
-    #       payload_available: online
-    #       payload_not_available: offline
-    #   device: *beekpr_hive_01_device
-    #
-    # - name: Hive 01 Corner 3 weight
-    #   unique_id: beekpr_hive_01_corner3_kg
-    #   default_entity_id: sensor.hive_01_corner3_weight
-    #   state_topic: beekpr/hive-01/state
-    #   value_template: "{{ value_json.corner3_kg }}"
-    #   unit_of_measurement: kg
-    #   state_class: measurement
-    #   device_class: weight
-    #   icon: mdi:scale-bathroom
-    #   expire_after: 45000
-    #   availability:
-    #     - topic: beekpr/hive-01/availability
-    #       payload_available: online
-    #       payload_not_available: offline
-    #   device: *beekpr_hive_01_device
-    #
-    # - name: Hive 01 Corner 4 weight
-    #   unique_id: beekpr_hive_01_corner4_kg
-    #   default_entity_id: sensor.hive_01_corner4_weight
-    #   state_topic: beekpr/hive-01/state
-    #   value_template: "{{ value_json.corner4_kg }}"
-    #   unit_of_measurement: kg
-    #   state_class: measurement
-    #   device_class: weight
-    #   icon: mdi:scale-bathroom
-    #   expire_after: 45000
-    #   availability:
-    #     - topic: beekpr/hive-01/availability
-    #       payload_available: online
-    #       payload_not_available: offline
-    #   device: *beekpr_hive_01_device
+    # Per-corner diagnostics (FR-11): a stuck/drifting/disconnected corner
+    # shows up here before it skews the total. corner<N>_kg = mux channel N-1.
+    - name: Hive 01 Corner 1 weight
+      unique_id: beekpr_hive_01_corner1_kg
+      default_entity_id: sensor.hive_01_corner1_weight
+      state_topic: beekpr/hive-01/state
+      value_template: >-
+        {{ value_json.corner1_kg if value_json.corner1_kg is not none else 'unknown' }}
+      unit_of_measurement: kg
+      state_class: measurement
+      device_class: weight
+      icon: mdi:scale-bathroom
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 Corner 2 weight
+      unique_id: beekpr_hive_01_corner2_kg
+      default_entity_id: sensor.hive_01_corner2_weight
+      state_topic: beekpr/hive-01/state
+      value_template: >-
+        {{ value_json.corner2_kg if value_json.corner2_kg is not none else 'unknown' }}
+      unit_of_measurement: kg
+      state_class: measurement
+      device_class: weight
+      icon: mdi:scale-bathroom
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 Corner 3 weight
+      unique_id: beekpr_hive_01_corner3_kg
+      default_entity_id: sensor.hive_01_corner3_weight
+      state_topic: beekpr/hive-01/state
+      value_template: >-
+        {{ value_json.corner3_kg if value_json.corner3_kg is not none else 'unknown' }}
+      unit_of_measurement: kg
+      state_class: measurement
+      device_class: weight
+      icon: mdi:scale-bathroom
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
+
+    - name: Hive 01 Corner 4 weight
+      unique_id: beekpr_hive_01_corner4_kg
+      default_entity_id: sensor.hive_01_corner4_weight
+      state_topic: beekpr/hive-01/state
+      value_template: >-
+        {{ value_json.corner4_kg if value_json.corner4_kg is not none else 'unknown' }}
+      unit_of_measurement: kg
+      state_class: measurement
+      device_class: weight
+      icon: mdi:scale-bathroom
+      expire_after: 45000
+      availability:
+        - topic: beekpr/hive-01/availability
+          payload_available: online
+          payload_not_available: offline
+      device: *beekpr_hive_01_device
 
     - name: Hive 01 Scale temperature
       unique_id: beekpr_hive_01_temp_scale_c
@@ -178,21 +180,6 @@ mqtt:
       unit_of_measurement: V
       state_class: measurement
       device_class: voltage
-      expire_after: 45000
-      availability:
-        - topic: beekpr/hive-01/availability
-          payload_available: online
-          payload_not_available: offline
-      device: *beekpr_hive_01_device
-
-    - name: Hive 01 Boost keep-on
-      unique_id: beekpr_hive_01_boost_keep_on
-      default_entity_id: binary_sensor.hive_01_boost_keep_on
-      state_topic: beekpr/hive-01/state
-      value_template: "{{ value_json.boost_keep_on }}"
-      payload_on: "true"
-      payload_off: "false"
-      icon: mdi:power-plug-battery
       expire_after: 45000
       availability:
         - topic: beekpr/hive-01/availability

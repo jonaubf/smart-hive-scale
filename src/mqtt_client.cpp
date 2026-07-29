@@ -181,6 +181,10 @@ bool ensureNetwork(unsigned long networkTimeoutMs) {
       wifiManagerShow();
       return false;
     }
+    // WiFi mode's clock source (SNTP), mirroring modemManagerEnsureGprs()'s
+    // NITZ/NTP sync in GSM mode. Non-fatal: a publish without a fresh sync
+    // is still a publish.
+    wifiManagerSyncClock();
     return true;
   }
 
@@ -212,10 +216,10 @@ void drainModemTxBeforeClose() {
   }
 }
 
-// Weight/temp/battery/clock snapshot, captured before any modem/WiFi
-// activity. GSM registration, GPRS attach, and the TLS handshake all draw
-// current spikes (SIM800 TX bursts up to ~2A) on the same shared supply the
-// NAU7802's bridge excitation runs from — sampling mid-conversion, or
+// Weight (all 4 corners)/temp/battery/clock snapshot, captured before any
+// modem/WiFi activity. GSM registration, GPRS attach, and the TLS handshake
+// all draw current spikes (SIM800 TX bursts up to ~2A) on the same shared
+// supply the NAU7802s' bridge excitation runs from — sampling mid-conversion, or
 // mid-I2C-transaction for the DS3231 read, during one of those spikes can
 // corrupt a reading (confirmed in the field 2026-07-17: a garbled
 // report_time with an out-of-range month/day/minute, read while the modem

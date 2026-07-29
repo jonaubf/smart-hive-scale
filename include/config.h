@@ -56,6 +56,12 @@
 #define WIFI_CONNECT_TIMEOUT_MS 15000UL
 #endif
 
+// SNTP wait after WiFi STA connect (WiFi mode's clock source, mirroring
+// GSM's NITZ/NTP). On a LAN this normally completes in well under a second.
+#ifndef WIFI_SNTP_TIMEOUT_MS
+#define WIFI_SNTP_TIMEOUT_MS 10000UL
+#endif
+
 #ifndef MODEM_NETWORK_TIMEOUT_MS
 #define MODEM_NETWORK_TIMEOUT_MS 120000UL
 #endif

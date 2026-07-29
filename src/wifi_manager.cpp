@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "config.h"
 #include "connectivity_mode.h"
@@ -65,6 +66,38 @@ bool wifiManagerConnect(unsigned long timeoutMs) {
   }
 
   Serial.println(F("ERR WiFi connect timeout"));
+  return false;
+}
+
+bool wifiManagerSyncClock() {
+  if (!wifiManagerIsConnected()) {
+    return false;
+  }
+
+  // Deliberately re-syncs on every call, same as modemManagerSyncClock()
+  // (2026-07-23 lesson): between real syncs the system clock free-runs on
+  // the ESP32's uncalibrated internal oscillator through each multi-hour
+  // deep sleep, and rtcClockSyncFromSystemTimeIfNeeded() trusts it as the
+  // DS3231's source of truth — "already plausible" is not "still correct".
+  configTime(0, 0, "pool.ntp.org");
+  Serial.println(F("Clock: SNTP sync via WiFi..."));
+
+  constexpr time_t kPlausibleEpoch = 1704067200;  // 2024-01-01T00:00:00Z
+  const unsigned long deadline = millis() + WIFI_SNTP_TIMEOUT_MS;
+  while (static_cast<long>(millis() - deadline) < 0) {
+    const time_t now = time(nullptr);
+    if (now >= kPlausibleEpoch) {
+      struct tm utc;
+      gmtime_r(&now, &utc);
+      Serial.printf("Clock synced: %04d-%02d-%02d %02d:%02d:%02d UTC\n",
+                    utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour,
+                    utc.tm_min, utc.tm_sec);
+      return true;
+    }
+    delay(100);
+  }
+
+  Serial.println(F("ERR SNTP sync timeout"));
   return false;
 }
 
