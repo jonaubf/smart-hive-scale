@@ -76,20 +76,34 @@
 #define MODEM_MQTT_CONNECT_TIMEOUT_MS 120000UL
 #endif
 
-// Battery ADC defaults for TTGO T-Call.
-// Vbat is nominally divided 2:1 before the ADC input, but the naive
-// raw-to-voltage conversion below doesn't use ESP32's factory ADC
-// calibration, and real divider resistors have their own tolerance — so the
-// nominal 2.0 ratio measured ~6.6% low against a multimeter on this unit
-// (reported 3.85V vs. actual 4.103V). Single-point-calibrated against that
-// reading (2.0 * 4.103/3.85) rather than assumed from the nominal resistor
-// values; re-derive the same way if you swap boards or resistors.
+// Battery ADC. Vbat is nominally divided 2:1 (100k/100k) before the ADC
+// input, but the naive raw-to-voltage conversion below doesn't use ESP32's
+// factory ADC calibration, and real divider resistors have their own
+// tolerance — the nominal 2.0 ratio measured ~6.6% low against a multimeter
+// on the old T-Call unit (reported 3.85V vs. actual 4.103V). The ratio below
+// is that T-Call-calibrated value, carried over as a placeholder —
+// single-point-calibrate it against a multimeter on this board's own divider
+// (plan E2) the same way: measured_ratio = nominal * actual_v / reported_v.
 constexpr float BATTERY_ADC_REF_V = 3.3f;
 constexpr float BATTERY_ADC_MAX = 4095.0f;
 constexpr float BATTERY_DIVIDER_RATIO = 2.1314f;
 constexpr uint8_t BATTERY_ADC_SAMPLES = 16;
 constexpr float BATTERY_EMPTY_V = 3.30f;
 constexpr float BATTERY_FULL_V = 4.20f;
+
+// 4 load cells, one per hive-stand corner, each behind its own NAU7802.
+// All NAU7802s share the fixed I2C address 0x2A, so each sits on its own
+// PCA9548A mux channel (0..NUM_CORNERS-1); the mux itself is upstream on
+// the shared bus.
+constexpr uint8_t NUM_CORNERS = 4;
+constexpr uint8_t I2C_MUX_ADDR = 0x70;  // PCA9548A, A0/A1/A2 tied to GND
+
+// SIM800L rail control (PIN_MODEM_EN -> CR-SJ5530 #2's EN). No PWRKEY on
+// this module — it auto-boots when the rail comes up, and powers off by
+// dropping the whole rail (AT+CPOWD=1 first for a clean network detach).
+constexpr unsigned long MODEM_EN_SETTLE_MS = 100UL;       // rail rise/settle before first UART traffic
+constexpr unsigned long MODEM_BOOT_TIMEOUT_MS = 10000UL;  // wait for the module to answer AT after EN high
+constexpr unsigned long MODEM_CPOWD_DETACH_MS = 3000UL;   // CPOWD -> network detach window before EN low
 
 // NAU7802: gain 128, 10 SPS, internal LDO 3.0 V for bridge excitation.
 constexpr uint8_t SCALE_RAW_SAMPLES = 10;
@@ -100,6 +114,11 @@ constexpr uint8_t SCALE_WARMUP_READS = 5;
 // power-up (self-heating). Scheduled reports wait this long since boot
 // before measuring so every report is taken at the same thermal state.
 constexpr unsigned long SCALE_THERMAL_WARMUP_MS = 2UL * 60UL * 1000UL;
+// Live bench/portal display samples *per corner*: a full-precision
+// SCALE_RAW_SAMPLES pass over 4 corners takes ~4 s at 10 SPS, too slow for
+// a 2 s refresh — 3 per corner (~1.2 s total) keeps the display responsive.
+// Publish-cycle snapshots still use SCALE_RAW_SAMPLES per corner.
+constexpr uint8_t SCALE_LIVE_SAMPLES = 3;
 // Tare/calibrate: single pass — short settle, then median of these samples
 // (~2 s at 10 SPS).
 constexpr uint8_t SCALE_CAL_SAMPLES = 20;
@@ -123,15 +142,6 @@ constexpr unsigned long PUBLISH_RETRY_BASE_DELAY_MS = 30000UL;
 // commands, live readings, portal) before publishing and going to sleep.
 // Any serial input extends the window.
 constexpr unsigned long BENCH_STAY_AWAKE_MS = 5UL * 60UL * 1000UL;
-
-// On battery, deep sleep longer than ~32 s risks the IP5306 auto-cutting the
-// 5 V rail if its "keep boost on" register bit isn't actually held (some
-// clones ack the I2C write without the bit sticking). app_scheduler.cpp only
-// arms the ESP32's internal timer for this short window — waking to reset
-// the PMIC's own shutoff timer, independent of the DS3231-driven report
-// schedule — when the verified read-back says the bit didn't take; a
-// verified-good PMIC sleeps on the DS3231 alarm alone.
-constexpr unsigned long IP5306_KEEPALIVE_CHUNK_SEC = 25UL;
 
 // WiFi's radio teardown (esp_wifi_stop()) right before deep sleep draws a
 // brief current spike. Over USB this is invisible (USB backs the rail); on

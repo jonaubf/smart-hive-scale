@@ -10,7 +10,6 @@
 #include "connectivity_mode.h"
 #include "device_settings.h"
 #include "gsm_settings.h"
-#include "ip5306.h"
 #include "modem_manager.h"
 #include "mqtt_settings.h"
 #include "radio_manager.h"
@@ -51,8 +50,8 @@ button.secondary{background:#555}
 <div id="status"></div>
 <h2>Weight calibration</h2>
 <div id="weightBox">Loading…</div>
-<p>Offset: <span id="offset">-</span> · Scale: <span id="scale">-</span></p>
-<button type="button" id="tareBtn">Tare (empty scale)</button>
+<p>Offsets: <span id="offset">-</span> · Span: <span id="scale">-</span></p>
+<button type="button" id="tareBtn">Tare (empty scale, all corners)</button>
 <div class="row">
 <label>Known weight (kg)<input type="number" id="knownKg" step="0.001" min="0.001"></label>
 <button type="button" id="calBtn">Calibrate</button>
@@ -112,9 +111,9 @@ $("scale").textContent=s.scale;
 async function loadSettings(){fillForm(await (await fetch("/api/settings")).json());}
 async function refreshWeight(){
 const w=await (await fetch("/api/weight")).json();
-if(!w.ok){$("weightBox").textContent="Sensor not ready";return;}
-let t="Raw: "+w.raw;
-if(w.weight_kg!==undefined)t+=" · Weight: "+w.weight_kg+" kg";
+if(!w.corners){$("weightBox").textContent="Sensors not ready";return;}
+let t=w.corners.map((c,i)=>"c"+i+": "+(c.ok?(c.kg!==undefined?c.kg+" kg":c.raw):"n/a")).join(" · ");
+if(w.weight_kg!==undefined)t+=" · Total: "+w.weight_kg+" kg";
 $("weightBox").textContent=t;
 }
 async function postAction(url,body){
@@ -150,6 +149,18 @@ void jsonKeyString(String &json, const char *key, const char *value) {
   json += "\":\"";
   jsonEscapeAppend(json, value);
   json += '"';
+}
+
+// "off0/off1/off2/off3" — compact per-corner offsets for the UI.
+String offsetsSummary() {
+  String out;
+  for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+    if (corner > 0) {
+      out += '/';
+    }
+    out += String(calibrationOffset(corner));
+  }
+  return out;
 }
 
 String buildSettingsJson() {
@@ -197,9 +208,9 @@ String buildSettingsJson() {
   json += "\"cell_cid\":";
   json += String(cell.cid);
   json += ',';
-  json += "\"offset\":";
-  json += String(calibrationOffset());
-  json += ',';
+  json += "\"offset\":\"";
+  json += offsetsSummary();
+  json += "\",";
   json += "\"scale\":";
   json += String(calibrationScale(), 3);
   json += ',';
@@ -210,18 +221,30 @@ String buildSettingsJson() {
 }
 
 String buildWeightJson() {
-  WeightSensorReading reading = weightSensorReadRaw(SCALE_RAW_SAMPLES);
+  const ScaleReading reading = calibrationReadAll(SCALE_LIVE_SAMPLES);
   String json = "{\"ok\":";
-  if (!reading.ok) {
-    json += "false}";
-    return json;
+  json += reading.ok ? "true" : "false";
+  json += ",\"corners\":[";
+  for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+    if (corner > 0) {
+      json += ',';
+    }
+    json += "{\"ok\":";
+    json += reading.cornerOk[corner] ? "true" : "false";
+    if (reading.cornerOk[corner]) {
+      json += ",\"raw\":";
+      json += String(reading.cornerRaw[corner]);
+      if (!isnan(reading.cornerKg[corner])) {
+        json += ",\"kg\":";
+        json += String(reading.cornerKg[corner], 3);
+      }
+    }
+    json += '}';
   }
-
-  json += "true,\"raw\":";
-  json += String(reading.raw);
-  if (calibrationIsReady()) {
+  json += ']';
+  if (!isnan(reading.totalKg)) {
     json += ",\"weight_kg\":";
-    json += String(calibrationWeightKg(reading.raw), 3);
+    json += String(reading.totalKg, 3);
   }
   json += '}';
   return json;
@@ -241,9 +264,9 @@ void handleWeightGet() { server.send(200, "application/json", buildWeightJson())
 
 void handleTarePost() {
   if (calibrationTare()) {
-    String response = "{\"ok\":true,\"offset\":";
-    response += String(calibrationOffset());
-    response += '}';
+    String response = "{\"ok\":true,\"offset\":\"";
+    response += offsetsSummary();
+    response += "\"}";
     server.send(200, "application/json", response);
     return;
   }
@@ -408,9 +431,6 @@ void maintenancePortalBegin(bool forceAp) {
   setCpuFrequencyMhz(160);
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   radioPowerUpForPortal();
-  if (!ip5306EnsureBoostKeepOn()) {
-    Serial.println(F("WARN IP5306 boost keep-on failed"));
-  }
   snprintf(apSsid, sizeof(apSsid), "beekpr-%s", DEVICE_ID);
   WiFi.setSleep(false);
   WiFi.setTxPower(WIFI_POWER_2dBm);

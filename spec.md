@@ -529,7 +529,14 @@ post-`CPOWD` state. `RST` stays wired normally — it's a genuine pin on this bo
 missing `PWRKEY`. One boot-time consequence to plan for in firmware: `EN` is enabled by default and
 GPIO4 floats until firmware configures it, so on any cold boot the modem rail comes up (and the
 SIM800L auto-boots) before `setup()` runs — drive GPIO4 low early in boot when the modem isn't
-needed (WiFi mode, bench mode), rather than assuming the modem starts powered off.
+needed (WiFi mode, bench mode), rather than assuming the modem starts powered off. The same
+applies across **deep sleep**: the ESP32 releases normal GPIO output state on sleep entry, so a
+plain `digitalWrite(4, LOW)` floats once asleep, `EN` re-enables, and the modem runs (and drains
+the battery) through the entire sleep window. GPIO4 is an RTC-domain pin — latch it with
+`gpio_hold_en(GPIO_NUM_4)` + `gpio_deep_sleep_hold_en()` before every deep-sleep entry, and
+release with `gpio_hold_dis()` after wake before driving it again. Verify with the sleep-current
+audit (`doc/rework-implementation-plan.md`, E5): a sleeping board drawing mA instead of µA most
+likely means this hold is missing.
 
 | SIM800L | Connects to | Notes |
 |---------|--------------|-------|
@@ -644,7 +651,8 @@ software correction can fully compensate for.
 ## 12. Implementation Plan
 
 Steps 1-11 below are the original TTGO T-Call-based v1 (retired — see §2 for why). Steps 12+ are
-the discrete-hardware rework, not yet built.
+the discrete-hardware rework, not yet built — the detailed, phase-by-phase firmware plan for them
+lives in [`doc/rework-implementation-plan.md`](doc/rework-implementation-plan.md).
 
 | Step | Goal | Deliverable |
 |------|------|-------------|

@@ -41,6 +41,7 @@ See **[Local development setup](doc/local-setup.md)** for wiring, calibration, a
 | [**T-Call hardware**](doc/esp32_sim800l.md) | Board pinout and NAU7802/DS18B20 wiring diagrams |
 | [**MQTT & TLS setup**](doc/mqtt-tls-setup.md) | Mosquitto certificates, port forward, field device security |
 | [**Project specification**](spec.md) | Requirements, architecture, implementation plan |
+| [**Rework implementation plan**](doc/rework-implementation-plan.md) | Phase-by-phase firmware plan for the discrete ESP32 + 4-corner build |
 | [**Home Assistant YAML**](doc/home-assistant/mqtt_sensors.yaml) | MQTT entities grouped under one device per hive |
 
 ## Hardware
