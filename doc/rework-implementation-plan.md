@@ -115,8 +115,8 @@ corner, then sum of medians. `calibrationShow()` prints all 5 values.
 - `i2cscan` — repurpose from "PMIC bus scan" to: scan the main bus (expect 0x70, 0x68), then
   each mux channel (expect 0x2A) — this becomes the step-13 bring-up tool.
 
-**C6. `telemetry_payload`.** Add `corner1_kg`..`corner4_kg` (mux channels 0–3 in order, per
-spec §7); `boost_keep_on` is already gone from B1.
+**C6. `telemetry_payload`.** Add `corner1_kg`..`corner4_kg` (corner index order — mux channels
+0, 1, 2, 7 per `CORNER_MUX_CHANNEL`, spec §7); `boost_keep_on` is already gone from B1.
 
 **C7. `maintenance_portal` calibration page.** Live per-corner readings, one tare-all button,
 span-calibrate with known kg (portal UI per spec §9). OTA/settings sections unchanged — FR-9b
@@ -159,9 +159,11 @@ corner-weight entities; delete the `Boost keep-on` binary sensor (field no longe
    before wiring loads — spec §10 warns the 5 V tap is a one-mistake modem killer.
 2. Do the `PS`-pad short + indicator-LED removal on **both**; measure standby current (<100 µA
    each, spec BOM).
-3. **`EN` threshold bench test** (the flagged unknown): confirm ESP32-level 3.3 V high enables
-   CR-SJ5530 #2 and 0 V disables it, at simulated `VIN` of both ~3.0 V and ~4.2 V. If it fails
-   at any point in the range, stop and revisit rail switching before any firmware relies on it.
+3. **`EN` threshold bench test** — **done, verified 2026-07-29**: measured internal
+   `VIN —620 kΩ— EN —1.1 MΩ— GND` divider ⇒ float ≈0.64×VIN ⇒ threshold <1.9 V, so 3.3 V
+   high works at any VIN. ESP32-driven test passed: off at boot, 4.2 V on `modem`, ~0 V on
+   `modemoff`, and stays off through deep sleep (GPIO hold confirmed). Wire GPIO4 → `EN`
+   direct or ≤1 kΩ series (spec §10).
 4. Ideal-diode module orientation (`IN` ← CR-SJ5530 #1, `OUT` → ESP32 `3V3`) verified against
    the board silkscreen; ESP32 boots on battery; both rails hold under load.
 
@@ -169,7 +171,8 @@ corner-weight entities; delete the `Boost keep-on` binary sensor (field no longe
 `BATTERY_DIVIDER_RATIO` per board (T-Call precedent: ~6.6% off nominal).
 
 **E3. I2C bring-up** (spec step 13): `i2cscan` shows 0x70 + 0x68 upstream and 0x2A on each of
-channels 0–3. DS3231 alarm wake (`ext1` on GPIO 14) fires from deep sleep.
+channels 0, 1, 2, 7 (`CORNER_MUX_CHANNEL`). DS3231 alarm wake (`ext1` on GPIO 14) fires from
+deep sleep.
 
 **E4. SIM800L bring-up** (spec step 15): `modem` → `gprs` → `mqttls` → `mqtt` on the new
 wiring; `EN` power-cycle from firmware (on → registered → `CPOWD` → rail off) repeated several

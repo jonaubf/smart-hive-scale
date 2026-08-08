@@ -18,7 +18,8 @@ constexpr int PIN_MODEM_EN = 4;
 constexpr int PIN_MODEM_RST = 5;  // active low; emergency reset only (normal power-off is AT+CPOWD=1 + EN low)
 
 // Single shared I2C bus: PCA9548A mux (0x70) and DS3231 (0x68) upstream,
-// 4x NAU7802 (all fixed at 0x2A) behind mux channels 0-3.
+// 4x NAU7802 (all fixed at 0x2A) behind mux channels CORNER_MUX_CHANNEL
+// (config.h — currently 0/1/2/7 as wired).
 constexpr int PIN_I2C_SDA = 21;
 constexpr int PIN_I2C_SCL = 22;
 

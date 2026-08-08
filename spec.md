@@ -87,7 +87,7 @@ building the power chain from scratch — and is also the natural point to move 
 | 5.1 V / 500 mW Zener diode (e.g. On Semi MMSZ5231BT1G, Vishay MMSZ4689-V) | SIM800L VBAT surge protection | Optional but datasheet-recommended (Table 5) — across VBAT/GND, close to the module, clamps surges before they reach the 4.5 V absolute max |
 | 1 kΩ + 5.6 kΩ resistors (a few) | UART level-shift, ESP32 (3.3 V) → SIM800L RXD (2.8 V max) | Series 1 kΩ + shunt 5.6 kΩ to GND — see §10 SIM800L wiring for the exact circuit (datasheet Figure 20) |
 | 2× 100 kΩ resistors + 100 nF capacitor (optional) | Battery voltage sense divider, Battery+ → ESP32 GPIO35 | Scales 3.0–4.2 V (single Li-ion range) down to 1.5–2.1 V for the ADC. Large values chosen to keep this always-on divider's continuous draw to ~21 µA — see §10 Battery voltage sense |
-| Modem power control: **GPIO4 → CR-SJ5530 #2's `EN` pin** (possibly through a small series resistor) | Modem power on/off | This board's `PWRKEY` is tied to GND internally (not exposed) — the only way to power-cycle the modem is to switch CR-SJ5530 #2 itself off, not just gate its output. `EN` low disables the whole module. **Needs bench verification before final commit** — the module's instructions don't state `EN`'s logic threshold, and `VIN` (raw battery) swings ~3.0–4.2 V, so confirm ESP32's fixed 3.3 V "high" reliably enables the module across that whole range before relying on it. See §10 SIM800L wiring |
+| Modem power control: **GPIO4 → CR-SJ5530 #2's `EN` pin** (possibly through a small series resistor) | Modem power on/off | This board's `PWRKEY` is tied to GND internally (not exposed) — the only way to power-cycle the modem is to switch CR-SJ5530 #2 itself off, not just gate its output. `EN` low disables the whole module. **Bench-verified (2026-07-29)** — `EN` is held high by an internal `VIN —620 kΩ— EN —1.1 MΩ— GND` divider (floats at ≈0.64×VIN, so the enable threshold is below ~1.9 V); ESP32's 3.3 V high clears it across the whole battery range, GPIO low sinks only ~7 µA to disable, and the rail stays off through deep sleep with the GPIO hold. Connect GPIO4 **directly or via ≤1 kΩ** — a large series resistor would weaken the off level against the 620 kΩ pull-up. See §10 SIM800L wiring |
 | GSM antenna | 2G RF | Mount outside enclosure |
 | Nano SIM | GPRS data | 2G-enabled Ukrainian carrier |
 
@@ -115,7 +115,7 @@ building the power chain from scratch — and is also the natural point to move 
 │ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐                          │
 │ │ NAU7802 │ │ NAU7802 │ │ NAU7802 │ │ NAU7802 │   all at I2C 0x2A        │
 │ └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘                          │
-│      │ ch0       │ ch1       │ ch2       │ ch3                           │
+│      │ ch0       │ ch1       │ ch2       │ ch7                           │
 │      └───────────┴─────┬─────┴───────────┘                               │
 │                        ▼                                                 │
 │                ┌───────────────┐        ┌──────────┐                     │
@@ -165,8 +165,9 @@ building the power chain from scratch — and is also the natural point to move 
 ```
 
 Corner labels (FL/FR/RL/RR = front-left/front-right/rear-left/rear-right) are just a mounting
-convention — firmware addresses them by mux channel (0-3), not by name; label them consistently
-at mounting time.
+convention — firmware addresses them by corner index 0-3, mapped to the physical mux channels
+**0, 1, 2, 7** (as wired; `CORNER_MUX_CHANNEL` in `config.h`), not by name; label them
+consistently at mounting time.
 
 ### Software Modules
 
@@ -246,8 +247,8 @@ Example `device_id`: `hive-01`
 }
 ```
 
-`corner1_kg`..`corner4_kg` are each corner's own tared and calibrated weight (mux channels 0-3,
-in order) — `weight_kg`/`stable_kg` are their sum, kept as the primary fields so existing
+`corner1_kg`..`corner4_kg` are each corner's own tared and calibrated weight (corner index order,
+mux channels 0, 1, 2, 7 respectively) — `weight_kg`/`stable_kg` are their sum, kept as the primary fields so existing
 dashboards built against the single-cell design keep working unchanged.
 
 ### Home Assistant integration
@@ -387,7 +388,7 @@ boot-strapping pins (0, 2, 12, 15), UART0 (1, 3), internal flash (6-11).
 |--------|------|-------|
 | Modem UART2 TX (ESP → SIM800L RXD) | 17 | |
 | Modem UART2 RX (ESP ← SIM800L TXD) | 16 | |
-| Modem rail enable | 4 | Drives CR-SJ5530 #2's `EN` pin (needs verification, see below) — this board has no `PWRKEY` pin |
+| Modem rail enable | 4 | Drives CR-SJ5530 #2's `EN` pin (bench-verified, see below) — this board has no `PWRKEY` pin |
 | Modem RST | 5 | Active low |
 | I2C SDA | 21 | Shared bus: PCA9548A, DS3231, and (behind the mux) all 4 NAU7802 |
 | I2C SCL | 22 | |
@@ -405,7 +406,7 @@ avoid on 21/22 the way the T-Call required.
 |--------|-------------|----------|
 | PCA9548A | `0x70` (default — A0/A1/A2 tied to GND) | Upstream, directly on the ESP32's bus |
 | DS3231 | `0x68` | Upstream — unique address, doesn't need mux isolation |
-| NAU7802 × 4 | `0x2A` each (fixed) | Behind mux channels 0, 1, 2, 3 — one per corner |
+| NAU7802 × 4 | `0x2A` each (fixed) | Behind mux channels **0, 1, 2, 7** — one per corner (corner index → channel via `CORNER_MUX_CHANNEL` in `config.h`) |
 
 PCA9548A control is a single byte (`1 << channel`) written to its own address to select which
 downstream channel is connected — no library needed, plain `Wire` calls. `RESET` can be tied
@@ -430,8 +431,8 @@ different from the old YZC-1B cells previously documented here:
 |---------|--------------|-------|
 | VIN | 3.3 V rail | |
 | GND | GND | |
-| SCL | PCA9548A channel N (`SC0`-`SC3`) | N = 0-3, one channel per corner |
-| SDA | PCA9548A channel N (`SD0`-`SD3`) | |
+| SCL | PCA9548A channel N (`SCn`) | N ∈ {0, 1, 2, 7}, one channel per corner |
+| SDA | PCA9548A channel N (`SDn`) | |
 
 ### DS3231 → ESP32
 
@@ -516,13 +517,16 @@ therefore has to happen at the rail, not the pin.
 **Primary approach: `GPIO4 → CR-SJ5530 #2's `EN` pin`.** Per the module's own wiring instructions,
 `EN` low disables the whole module (not just its output — the converter itself stops), and it's
 enabled by default. This replaces the entire external switch that would otherwise be needed to gate
-the rail. **Verify before relying on it**: the instructions don't give `EN`'s logic threshold, and
-`VIN` (raw battery, feeding both CR-SJ5530s) swings roughly 3.0–4.2 V across a charge cycle — if
-`EN`'s enable threshold happens to scale with `VIN` rather than being a fixed low-voltage level,
-ESP32's fixed 3.3 V "high" might not clear it at every point in that range. Bench-check with a
-multimeter (`EN`'s own floating voltage tells you if/how it's pulled) and confirm the module actually
-switches on with ESP32 driving `EN` high at both a low (~3.0 V) and full (~4.2 V) simulated `VIN`
-before committing. Powering on = drive `EN` high, wait for auto-boot + the `RDY` URC; powering off =
+the rail. **Bench-verified (2026-07-29):** multimeter measurement found `EN` held high by an internal
+`VIN —620 kΩ— EN —1.1 MΩ— GND` divider, so floating `EN` sits at ≈0.64×VIN (1.9–2.7 V across the
+battery range) — and since the module is enabled by default at both extremes, its enable threshold is
+below ~1.9 V, safely under ESP32's fixed 3.3 V high at any point in the charge cycle. Driving low only
+sinks ~7 µA through the 620 kΩ. Verified live with the ESP32: rail off at boot (firmware drives GPIO4
+low first thing), 4.2 V on power-on, ~0 V on power-off, and — critically — still off after minutes of
+deep sleep (the `gpio_hold_en()` latch works; residual 0.06–0.2 V readings are just the output cap
+bleeding down, not a live rail). **Wire GPIO4 to `EN` directly or via ≤1 kΩ** — a large series
+resistor (e.g. 100 kΩ) would divide against the internal 620 kΩ pull-up and leave the "off" level at
+~0.5 V, not reliably low. Powering on = drive `EN` high, wait for auto-boot + the `RDY` URC; powering off =
 send `AT+CPOWD=1` first for a clean network deregistration (a UART command, needs no `PWRKEY`), then
 drive `EN` low a moment later to guarantee power is actually removed rather than trusting an unclear
 post-`CPOWD` state. `RST` stays wired normally — it's a genuine pin on this board, independent of the

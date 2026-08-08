@@ -11,7 +11,8 @@ struct CellTowerInfo {
   int cid;
 };
 
-// cornersKg points at NUM_CORNERS per-corner weights (mux channels 0-3,
+// cornersKg points at NUM_CORNERS per-corner weights (corner order, i.e.
+// mux channels CORNER_MUX_CHANNEL[0..3] from config.h,
 // emitted as corner1_kg..corner4_kg); NAN entries — a failed corner or an
 // uncalibrated scale — are emitted as JSON null (FR-11).
 // tempScaleC may be NAN (sensor missing/failed) — emitted as JSON null.

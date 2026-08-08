@@ -4,8 +4,8 @@
 
 // PCA9548A I2C multiplexer (I2C_MUX_ADDR, config.h) on the shared bus.
 // The 4 NAU7802s (all fixed at 0x2A) each sit behind their own downstream
-// channel (0..NUM_CORNERS-1); the DS3231 and the mux itself are upstream.
-// Control is a single byte: bit N connects channel N.
+// channel (CORNER_MUX_CHANNEL, config.h); the DS3231 and the mux itself are
+// upstream. Control is a single byte: bit N connects channel N.
 
 // Probe the mux. Logs an error and returns false if it doesn't respond;
 // safe to call the other functions afterwards (they fail cleanly).

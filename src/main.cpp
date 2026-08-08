@@ -68,8 +68,11 @@ void printBanner() {
   Serial.println();
   Serial.println(F("=== Smart Hive Scale ==="));
   Serial.printf("Device ID: %s\n", DEVICE_ID);
-  Serial.printf("NAU7802 x%u: I2C 0x2A behind PCA9548A 0x%02X ch 0-%u (bus SDA=%d SCL=%d)\n",
-                NUM_CORNERS, I2C_MUX_ADDR, NUM_CORNERS - 1, PIN_I2C_SDA, PIN_I2C_SCL);
+  Serial.printf("NAU7802 x%u: I2C 0x2A behind PCA9548A 0x%02X ch", NUM_CORNERS, I2C_MUX_ADDR);
+  for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+    Serial.printf("%c%u", corner == 0 ? ' ' : '/', CORNER_MUX_CHANNEL[corner]);
+  }
+  Serial.printf(" (bus SDA=%d SCL=%d)\n", PIN_I2C_SDA, PIN_I2C_SCL);
   Serial.printf("DS18B20: OneWire GPIO %d (4.7k pull-up to 3.3V)\n",
                 PIN_TEMP_ONEWIRE);
   rtcClockShow();
@@ -77,7 +80,7 @@ void printBanner() {
   Serial.println(
       F("Commands: tare | cal <kg> | show | reset | setint <min> | setcell <mcc> <mnc> <lac> <cid>"));
   Serial.println(
-      F("           setmode gsm|wifi | setwificred <ssid> <pass> | wificonn | modem | gprs | mqttls | mqtt | send | sleep | modemoff | i2cscan | portal | reboot"));
+      F("           setmode gsm|wifi | setwificred <ssid> <pass> | wificonn | modem | gprs | mqttls | mqtt | send | sleep | modemoff | battery | i2cscan | portal | reboot"));
   Serial.println();
   connectivityShow();
   gsmSettingsShow();
@@ -234,6 +237,17 @@ void handleCommand(const String &line) {
     return;
   }
 
+  if (line == "battery") {
+    // Single-point divider calibration (plan E2): compare against a
+    // multimeter on the raw battery node and scale BATTERY_DIVIDER_RATIO.
+    const float batteryV = batterySensorVoltage();
+    Serial.printf("battery_v=%.3f battery_pct=%d divider_ratio=%.4f\n",
+                  batteryV, batterySensorPercent(), BATTERY_DIVIDER_RATIO);
+    Serial.println(
+        F("calibrate: BATTERY_DIVIDER_RATIO = divider_ratio * V_multimeter / battery_v (config.h)"));
+    return;
+  }
+
   if (line == "i2cscan") {
     // Upstream scan first (expect PCA9548A 0x70 + DS3231 0x68), then probe
     // each mux channel for its corner's NAU7802 (0x2A). The step-13
@@ -256,11 +270,12 @@ void handleCommand(const String &line) {
                     I2C_MUX_ADDR);
       return;
     }
-    for (uint8_t channel = 0; channel < NUM_CORNERS; channel++) {
+    for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+      const uint8_t channel = CORNER_MUX_CHANNEL[corner];
       i2cMuxSelect(channel);
       Wire.beginTransmission(0x2A);
       const bool nauFound = Wire.endTransmission() == 0;
-      Serial.printf("  mux ch%u: NAU7802 0x2A %s\n", channel,
+      Serial.printf("  corner %u (mux ch%u): NAU7802 0x2A %s\n", corner, channel,
                     nauFound ? "found" : "MISSING");
     }
     i2cMuxDeselectAll();

@@ -22,7 +22,7 @@ bool selectCorner(uint8_t corner) {
   if (corner >= NUM_CORNERS) {
     return false;
   }
-  return i2cMuxSelect(corner);
+  return i2cMuxSelect(CORNER_MUX_CHANNEL[corner]);
 }
 
 bool waitForConversion(unsigned long timeoutMs) {
@@ -102,7 +102,7 @@ bool weightSensorBegin() {
       anyPresent = true;
     } else {
       Serial.printf("ERR NAU7802 corner %u not found (mux channel %u, I2C 0x2A)\n",
-                    corner, corner);
+                    corner, CORNER_MUX_CHANNEL[corner]);
     }
   }
   i2cMuxDeselectAll();

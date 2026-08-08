@@ -85,24 +85,25 @@
 // Battery ADC. Vbat is nominally divided 2:1 (100k/100k) before the ADC
 // input, but the naive raw-to-voltage conversion below doesn't use ESP32's
 // factory ADC calibration, and real divider resistors have their own
-// tolerance — the nominal 2.0 ratio measured ~6.6% low against a multimeter
-// on the old T-Call unit (reported 3.85V vs. actual 4.103V). The ratio below
-// is that T-Call-calibrated value, carried over as a placeholder —
-// single-point-calibrate it against a multimeter on this board's own divider
-// (plan E2) the same way: measured_ratio = nominal * actual_v / reported_v.
+// tolerance. Single-point-calibrated on this board (plan E2, 2026-08-07):
+// old ratio 2.1314 reported 4.026 V vs. 4.112 V on the multimeter ⇒
+// 2.1314 * 4.112 / 4.026 = 2.1769. Recalibrate the same way if the divider
+// resistors or the board ever change.
 constexpr float BATTERY_ADC_REF_V = 3.3f;
 constexpr float BATTERY_ADC_MAX = 4095.0f;
-constexpr float BATTERY_DIVIDER_RATIO = 2.1314f;
+constexpr float BATTERY_DIVIDER_RATIO = 2.1769f;
 constexpr uint8_t BATTERY_ADC_SAMPLES = 16;
 constexpr float BATTERY_EMPTY_V = 3.30f;
 constexpr float BATTERY_FULL_V = 4.20f;
 
 // 4 load cells, one per hive-stand corner, each behind its own NAU7802.
 // All NAU7802s share the fixed I2C address 0x2A, so each sits on its own
-// PCA9548A mux channel (0..NUM_CORNERS-1); the mux itself is upstream on
-// the shared bus.
+// PCA9548A mux channel; the mux itself is upstream on the shared bus.
 constexpr uint8_t NUM_CORNERS = 4;
 constexpr uint8_t I2C_MUX_ADDR = 0x70;  // PCA9548A, A0/A1/A2 tied to GND
+// Corner index (0..NUM_CORNERS-1, the order corner1_kg..corner4_kg is
+// reported in) -> physical PCA9548A channel, as actually wired.
+constexpr uint8_t CORNER_MUX_CHANNEL[NUM_CORNERS] = {0, 1, 2, 7};
 
 // SIM800L rail control (PIN_MODEM_EN -> CR-SJ5530 #2's EN). No PWRKEY on
 // this module — it auto-boots when the rail comes up, and powers off by
