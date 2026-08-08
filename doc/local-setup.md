@@ -2,21 +2,25 @@
 
 Instructions for building and flashing Smart Hive Scale firmware on your machine.
 
-**Hardware rework in progress:** everything below describes the **TTGO T-Call V1.3/V1.4** board that the
-current firmware actually targets. The project is moving to a discrete **ESP32-WROOM-32** build with a
-standalone SIM800L and **4 corner load cells** behind a PCA9548A I2C mux — see [spec.md](../spec.md) §10 for
-that target wiring/GPIO map and calibration procedure. None of it is implemented yet, so build/flash/wiring
-steps here remain the accurate ones to follow until the rework lands; don't mix pin numbers or commands from
-spec.md's target architecture into a T-Call board, or vice versa.
+Targets the discrete **ESP32-WROOM-32** build: standalone SIM800L, TP4056 + 2× CR-SJ5530 power chain, 4 corner
+load cells (each behind its own NAU7802) on a PCA9548A I2C mux, DS3231 precision RTC — see
+[spec.md](../spec.md) §10 for the full wiring/GPIO map and BOM. For the retired TTGO T-Call firmware, use the
+`tcall-v1` git tag.
 
 ## Prerequisites
 
-- **TTGO T-Call V1.3** board (USB data cable — not charge-only)
+- **ESP32-WROOM-32** dev board, wired per spec.md §10 (USB data cable — not charge-only)
+- A charged Li-Ion/LiPo battery connected to the TP4056 — **required even on the bench**. The TP4056 alone
+  cannot source the SIM800L's ~2A boot-current bursts; without a battery to buffer them, the whole supply
+  oscillates and resets the board. USB can stay attached too (it only charges the battery through the TP4056),
+  but never run the board on USB with no battery fitted.
 - **macOS / Linux / Windows** with USB port
 - **Python 3** (for project virtualenv)
 - **Git**
 
-macOS note: the board uses a **CP2102** USB-serial chip. Install the [Silicon Labs CP210x driver](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers) if the serial port does not appear.
+macOS note: most ESP32-WROOM-32 devkits use a **CP2102** or **CH340** USB-serial chip. Install the
+[Silicon Labs CP210x driver](https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers) (CP2102) or the
+appropriate CH340 driver if the serial port does not appear.
 
 ## One-time setup
 
@@ -33,7 +37,7 @@ Create a local secrets file:
 cp .env.example .env
 ```
 
-Edit `.env` with real MQTT credentials before builds that need them. Step 2 (scale bench test) does not use MQTT yet.
+Edit `.env` with real MQTT credentials before builds that need them. Bench weight testing does not need MQTT.
 
 ### PlatformIO in a virtualenv (recommended)
 
@@ -92,7 +96,7 @@ List detected serial ports:
 Force a specific port:
 
 ```bash
-.venv/bin/pio run -t upload --upload-port /dev/cu.SLAB_USBtoUART
+.venv/bin/pio run -t upload --upload-port /dev/cu.usbserial-XXXX
 ```
 
 ## Option — Cursor / VS Code PlatformIO extension
@@ -104,110 +108,147 @@ If you use both the extension and the venv CLI, prefer **one** for uploads to av
 Extension workflow:
 
 1. Open the project folder in Cursor / VS Code
-2. Select environment **`ttgo-t-call`**
+2. Select environment **`esp32-discrete`**
 3. **Build** → **Upload** → **Monitor** (115200 baud) from the PlatformIO sidebar
 
 ## Wiring
 
-![Wiring diagram: TTGO T-Call, NAU7802, DS18B20, DS3231, load cell, setup button](tcall_nau7802_wiring.svg)
+![Wiring diagram: ESP32-WROOM-32, 4× NAU7802 + PCA9548A, DS3231, DS18B20, SIM800L, power chain](smart-apiary-scale-schematic.svg)
 
-### TTGO T-Call V1.3 pinout
+Full BOM, mechanical notes, and power-chain wiring: [spec.md §5/§10](../spec.md#10-hardware-connections).
+SIM800L-specific wiring/bring-up: [`esp32_sim800l.md`](esp32_sim800l.md).
 
-Onboard SIM800L and reserved pins are marked on the diagram. **Do not use GPIO 21/22** (IP5306 I2C) or modem pins **4, 5, 23, 26, 27** for external sensors.
+### ESP32-WROOM-32 GPIO map
 
-![TTGO T-Call V1.3 pinout](T-Call.jpg)
+Bare devkit — no onboard modem/PMIC, so the only pins to avoid are the universal ESP32 ones (strapping 0/2/12/15,
+UART0 1/3, internal flash 6-11) plus what this project itself reserves:
 
-Official board repo: [LilyGO T-Call SIM800](https://github.com/xinyuan-lilygo/lilygo-t-call-sim800)
+| Signal | GPIO | Notes |
+|--------|------|-------|
+| Modem UART2 TX (ESP → SIM800L RXD) | 17 | Via 1k series + 5.6k shunt divider (3.3V → ~2.8V) |
+| Modem UART2 RX (ESP ← SIM800L TXD) | 16 | Via 1k series (protection only) |
+| Modem rail enable (`EN`) | 4 | Drives CR-SJ5530 #2's `EN` — this SIM800L board has no `PWRKEY` pin |
+| Modem RST | 5 | Active low; emergency reset only |
+| I2C SDA / SCL (single shared bus) | 21 / 22 | PCA9548A mux, DS3231, and all 4 NAU7802 (behind the mux) |
+| DS18B20 OneWire | 25 | 4.7 kΩ pull-up to 3.3 V required |
+| DS3231 SQW/INT (ext1 wake) | 14 | |
+| Setup button (ext0 wake) | 13 | NO to GND, internal pull-up |
+| Battery ADC | 35 | ADC1, input-only — 100k/100k divider, calibrate per board (see below) |
 
-### NAU7802 and load cell
+### I2C bus
 
-| NAU7802 | ESP32 (TTGO T-Call) |
-|---------|---------------------|
-| VIN     | 3.3 V               |
-| GND     | GND                 |
-| SCL     | GPIO 18             |
-| SDA     | GPIO 19             |
+One shared bus (GPIO 21/22) carries everything:
 
-**Why GPIO 18/19?** The NAU7802 needs its own I2C bus — GPIO 21/22 are hard-wired to the onboard IP5306 PMIC. Firmware runs the chip at address **0x2A**, gain 128, 10 SPS, and puts it into register-controlled power-down (~200 nA) before deep sleep, so no GPIO holds are needed.
+| Device | I2C address | Position |
+|--------|-------------|----------|
+| PCA9548A | `0x70` | Upstream, directly on the ESP32's bus |
+| DS3231 | `0x68` | Upstream — unique address, no mux isolation needed |
+| NAU7802 × 4 | `0x2A` each (fixed) | Behind mux channels **0, 1, 2, 7** — one per corner (`CORNER_MUX_CHANNEL` in `config.h`) |
 
-**Power:** 3.3 V from the T-Call header. Bridge excitation comes from the NAU7802's internal LDO (set to 3.0 V by firmware) — the load cell does not need a separate supply.
+Use serial `i2cscan` to verify: it scans the main bus (expect `0x70` + `0x68`), then probes each corner's mux
+channel for its NAU7802.
 
-| Load cell wire | NAU7802 | Notes (this project's cell) |
-|----------------|---------|-----------------------------|
-| White          | E+      | `vref` on original scale PCB |
-| Black          | E−      | `gnd` on original scale PCB |
-| Green          | A+      | `nn` — swap with Red if sign is wrong |
-| Red            | A−      | `np` |
+### NAU7802 and load cell (×4, one per corner)
+
+| NAU7802 | Connects to |
+|---------|-------------|
+| VIN | 3.3 V rail |
+| GND | GND |
+| SCL | PCA9548A channel N (`SCn`) — N ∈ {0, 1, 2, 7} |
+| SDA | PCA9548A channel N (`SDn`) |
+
+Firmware runs each chip at I2C **0x2A**, gain 128, 10 SPS, and puts it into register-controlled power-down
+before deep sleep. Note this only quiesces the chip's own ADC/analog front end — it does **not** cut its power
+rail (that rail is always-on; see the "sleep current" note below).
+
+| Load cell wire | NAU7802 | Notes |
+|-----------------|---------|-------|
+| Red | E+ | Excitation + |
+| Black | E− | Excitation − |
+| Green | A+ | Signal + |
+| White | A− | Signal − |
+| Bare shield | GND | Single-ended — tie at one end only |
+
+Bridge excitation comes from the NAU7802's internal LDO (3.0 V, set by firmware) — the load cell needs no
+separate supply.
 
 ### DS18B20 scale temperature sensor
 
-| DS18B20 | ESP32 (TTGO T-Call) |
-|---------|---------------------|
-| VDD     | 3.3 V               |
-| GND     | GND                 |
-| DQ      | GPIO 25             |
+| DS18B20 | ESP32 |
+|---------|-------|
+| VDD     | 3.3 V |
+| GND     | GND   |
+| DQ      | GPIO 25 |
 
-**Required:** a **4.7 kΩ** resistor from DQ to 3.3 V (OneWire pull-up). Glue the probe to the scale frame near the load cell — its reading is published as `temp_scale_c` for weight-drift analysis. If the sensor is missing, the firmware logs an error at boot and publishes `temp_scale_c: null`.
+**Required:** a **4.7 kΩ** resistor from DQ to 3.3 V (OneWire pull-up). Mount the probe on the scale frame near
+a load cell — its reading is published as `temp_scale_c`. If the sensor is missing, firmware logs an error at
+boot and publishes `temp_scale_c: null`.
 
 ### Setup button (config portal)
 
-Wire a **normally-open (NO)** push button between **GPIO 13** and **GND**. The firmware uses the internal pull-up; no external resistor needed.
-
-| Button terminal | ESP32 |
-|-----------------|-------|
-| One side        | GPIO 13 |
-| Other side      | GND   |
-
-**Hold the button for 10 seconds** to open the WiFi config portal (soft-AP). Release earlier to cancel.
+Wire a **normally-open (NO)** push button between **GPIO 13** and **GND**. Firmware uses the internal pull-up;
+no external resistor needed. **Hold 10 seconds** to open the WiFi config portal (soft-AP). Release earlier to
+cancel.
 
 ### DS3231 precision RTC (report scheduling)
 
-| DS3231 | ESP32 (TTGO T-Call) |
-|--------|---------------------|
-| VCC    | 3.3 V               |
-| GND    | GND                 |
-| SDA    | GPIO 21 (shares the IP5306 bus) |
-| SCL    | GPIO 22 (shares the IP5306 bus) |
-| SQW/INT | GPIO 14             |
+| DS3231 | ESP32 |
+|--------|-------|
+| VCC | 3.3 V |
+| GND | GND |
+| SDA | GPIO 21 (shared bus) |
+| SCL | GPIO 22 (shared bus) |
+| SQW/INT | GPIO 14 |
 
-**V1.3 vs V1.4 gotcha:** GPIO 32/33 look free on V1.3 but are wired to the modem's DTR/RI lines on V1.4 —
-firmware never touches them, but they're still physically traced to the SIM800 module, so anything else wired
-there would conflict with the modem regardless of code. GPIO 14 avoids this on both revisions. V1.4 also adds
-an onboard LED on GPIO 13, the same pin already used for the setup button — not yet confirmed whether that's a
-real conflict.
+I2C address **0x68**. `SQW`/`INT` is open-drain (the module has its own pull-up); it wakes the ESP32 from deep
+sleep via `ext1` when the scheduled report alarm fires, so reports land on precise wall-clock time instead of
+drifting on the ESP32's own RC-oscillator timer over weeks of deep sleep. If it isn't detected at boot, firmware
+logs an error and falls back to the ESP32's internal timer for scheduling (still correct, just less precise —
+see [CLAUDE.md](../CLAUDE.md)). Fit a CR2032 in the module's holder — the DS3231 keeps its own time and alarm
+state through a full power loss as long as the coin cell is good, which the ESP32's own RTC memory cannot do.
 
-I2C address **0x68** — no conflict with the IP5306 (0x75). `SQW`/`INT` is open-drain (the module has its own
-pull-up); it wakes the ESP32 from deep sleep via `ext1` when the scheduled report alarm fires, so reports land
-on precise wall-clock time instead of drifting on the ESP32's own RC-oscillator timer over weeks of deep sleep.
-If it isn't detected at boot, firmware logs an error and falls back to the ESP32's internal timer for scheduling
-(still correct, just less precise, and without the IP5306 keepalive-chunk protection — see
-[CLAUDE.md](../CLAUDE.md) for why). Fit a CR2032 in the module's holder if it has one — the DS3231 keeps its own time
-and alarm state through a full power loss as long as the coin cell is good, which the ESP32's own RTC memory
-cannot do.
-
-**A brand-new/never-set module** will show `lost_power=yes` and a bogus `2000-01-01` date on `show` — this
-does **not** break scheduling (alarms match on hour:minute only, so a report interval still fires at the right
-relative time regardless of the date), but it's cosmetically wrong until synced. In **GSM mode**, firmware
-syncs the DS3231 from the ESP32's system clock automatically once it's plausible (after
+**A brand-new/never-set module** will show `lost_power=yes` and a bogus power-on-reset date on `show` — this
+does **not** break scheduling (alarms match on hour:minute only), but it's cosmetically wrong until synced. In
+**GSM mode**, firmware syncs the DS3231 from the ESP32's system clock automatically once it's plausible (after
 `modemManagerSyncClock()`'s NITZ/NTP-over-GPRS sync succeeds during the first successful publish) — no action
 needed, just let one publish cycle complete. **WiFi mode has no clock source yet**, so the DS3231 won't
 self-correct there until one is added.
 
-## Calibration (Step 3)
+### Battery voltage divider — calibrate per board
+
+`BATTERY_DIVIDER_RATIO` in `config.h` is nominal (100kΩ/100kΩ ≈ 2:1); real resistor tolerances shift it a few
+percent per board. Calibrate once per board:
+
+```
+battery
+```
+
+prints the firmware's reading, current battery %, and the ratio in effect. Compare against a multimeter reading
+on the raw battery node (Battery+/GND, **USB/charger disconnected** so the reading isn't skewed by charge
+current) and compute:
+
+```
+new_ratio = old_ratio * V_multimeter / V_reported
+```
+
+Set the result as `BATTERY_DIVIDER_RATIO` in `config.h` and reflash.
+
+## Calibration
 
 Serial monitor at **115200 baud**. Commands:
 
 | Command | Action |
 |---------|--------|
-| `tare` | Zero the scale (empty platform) |
-| `cal 8` | Calibrate with known weight on the cell (use exact kg) |
-| `show` | Print stored offset and scale |
+| `tare` | Zero all 4 corners in one pass (empty platform); each corner gets its own offset |
+| `cal 8` | Derive the shared span factor from a known weight (kg) summed across all 4 tared corners |
+| `show` | Print stored per-corner offsets, shared span, and calibration status |
 | `reset` | Clear calibration from flash |
 | `setint 360` | Set telemetry interval to 360 minutes (stored in flash) |
-| `setcell 255 255 1234 56789` | Set cell tower IDs manually (normally filled by `modem` command) |
+| `setcell 255 255 1234 56789` | Set cell tower IDs manually (normally filled by `modem`) |
 | `modem` | Power on SIM800L, register on network, print RSSI/operator/cell IDs |
-| `modemoff` | Power off the modem |
-| `i2cscan` | Scan the PMIC I2C bus (GPIO 21/22) for any responding address — diagnoses IP5306 "not found" errors |
+| `modemoff` | Power off the modem (rail cut via `EN`) |
+| `battery` | Print battery voltage/%/divider ratio — for per-board divider calibration |
+| `i2cscan` | Scan the shared bus (expect `0x70` PCA9548A + `0x68` DS3231), then each mux channel for its NAU7802 |
 | `gprs` | Full GPRS test: register → attach GPRS → TCP to MQTT broker → disconnect |
 | `mqtt` | Full MQTT test: GPRS → TLS → publish state + availability to Mosquitto |
 | `setmode gsm` | Use cellular GPRS for MQTT (default; reboot to apply) |
@@ -216,7 +257,7 @@ Serial monitor at **115200 baud**. Commands:
 | `portal` | Open config portal immediately (same as 10s button hold) |
 | `wificonn` | Connect to saved WiFi (when `setmode wifi`) and print status |
 | `send` | Run one full publish cycle now (with retries) |
-| `sleep` | Enter deep sleep immediately (wake: setup button or timer) |
+| `sleep` | Enter deep sleep immediately (wake: setup button or RTC alarm) |
 | `reboot` | Restart the device |
 
 ### Bench mode and deep sleep
@@ -224,11 +265,11 @@ Serial monitor at **115200 baud**. Commands:
 - **GSM mode, cold boot** (reset/reflash/power connect): the device prints `Publish cycle starts in 5s — press setup button or hit Enter for bench mode`. Do nothing → it publishes headlessly and deep-sleeps. Press the button or hit Enter within 5 s → interactive bench mode (all commands above).
 - **WiFi mode, cold boot:** bench mode starts directly.
 - Bench mode lasts **5 minutes**; each serial command extends it. When it expires, the device publishes once and deep-sleeps.
-- From deep sleep, a **short button press** wakes into bench mode; the RTC timer wakes into a headless publish cycle.
+- From deep sleep, a **short button press** wakes into bench mode; the DS3231 alarm wakes into a headless publish cycle.
 - During publish retries (`Publish failed — retry in 30s`), pressing the setup button or sending serial aborts and enters bench mode.
 - During network wait and MQTT connect, button/serial aborts between TCP attempts (each attempt up to **15 s**).
 - Before each scheduled publish, a **2-minute sensor warm-up** runs (thermal settling). Button/serial aborts it.
-- Deep sleep: NAU7802 is put into register power-down, WiFi is fully stopped, modem powered off. Setup button (GPIO 13) wakes via ext0.
+- Deep sleep: all 4 NAU7802 are put into register power-down, WiFi is fully stopped, modem rail is cut (`EN` low, latched through sleep). Setup button (GPIO 13) wakes via ext0.
 
 ### Config portal (button or `portal` command)
 
@@ -240,7 +281,7 @@ Hold the setup button **10 seconds**, or send `portal` on serial. The device sta
 
 The web page lets you:
 
-1. **Calibrate** — live weight, tare, calibrate with known kg
+1. **Calibrate** — live per-corner weight, tare all 4 corners, calibrate shared span with known kg
 2. **WiFi client** — SSID and password for home LAN mode
 3. **GSM / SIM** — APN, username, password (for SIM changes)
 4. **Operating mode** — GSM or WiFi
@@ -280,28 +321,37 @@ wifi_connected=yes wifi_ip=192.168.1.42 wifi_rssi=-58
 
 MQTT payload also includes `wifi_connected`, `wifi_hostname`, `wifi_ip`, `wifi_rssi`.
 
-**Firmware file for OTA:** `.pio/build/ttgo-t-call/firmware.bin`
+**Firmware file for OTA:** `.pio/build/esp32-discrete/firmware.bin`
 
-**Procedure (trade-scale mechanics):**
+**Procedure (mechanics):**
 
-1. Power on, wait **~10 s** (ADC warm-up discard on boot)
-2. Empty platform, keep still → `tare`  
-   - Median of **20** consecutive samples (~2.5 s)  
-   - Fails if spread > 500 counts (unstable)
-3. Place known weight, keep still → `cal 8` (your actual kg)  
-   - Same single-pass median; keep the weight still  
+1. Power on with a battery connected, wait a few seconds (ADC warm-up discard on boot)
+2. Empty platform, keep still → `tare`
+   - Median of **20** consecutive samples per corner (~2.5 s each)
+   - Fails if spread > 500 counts on any corner (unstable)
+3. Place one known weight roughly centered on the platform, keep still → `cal 8` (your actual kg)
+   - Firmware sums all 4 (now-tared) corners' raw readings and derives one shared scale factor from that sum
    - Fails if samples are too noisy
-4. Readings show `weight_kg` (instant), `stable_kg` (median of last 5), and `mqtt_payload=...`
+4. Readings show per-corner `c0=… c1=… c2=… c3=…`, `weight_kg` (instant sum), `stable_kg` (median of last 5), and `mqtt_payload=...`
 
-**Scheduled reports:** before measuring, the device waits **2 minutes** after boot for thermal settling (`Sensor warm-up: measuring in Ns` on serial). Skipped if the device has already been awake that long (e.g. after the 5-minute bench window). Setup button or serial aborts the wait.
+This only assumes the *sum* of the 4 corners tracks weight linearly — it doesn't require the frame to
+distribute load exactly 1/4 to each corner, or the 4 cells to be perfectly matched. Watch the per-corner fields
+over time: a corner that drifts away from the other 3 is the first sign of a loose mount, damaged cell, or a
+corner that needs re-taring.
+
+**Scheduled reports:** before measuring, the device waits **2 minutes** after boot for thermal settling
+(`Sensor warm-up: measuring in Ns` on serial). Skipped if the device has already been awake that long (e.g.
+after the 5-minute bench window). Setup button or serial aborts the wait.
 
 **Persistence:** stored in NVS flash (survives power off). `reset` clears it.
 
-**Note:** Replacing the scale’s original electronics with ESP32+NAU7802 voids trade certification. Use for hive monitoring, not legal sale weighing.
+**Note:** this is for hive monitoring, not certified trade weighing.
 
-## Modem test (Step 4)
+## Modem test
 
-Requires a **2G SIM** with data plan inserted (nano SIM). Antenna connected.
+Requires a **2G SIM** with data plan inserted (nano SIM), antenna connected, and — critically — **a battery
+connected to the TP4056**, not USB power alone (see Prerequisites above; the modem's boot-current bursts will
+brownout a USB-only supply).
 
 1. Ensure `setmode gsm` (default) — modem is not used in WiFi mode
 2. Optional: set `GSM_PIN=` in `.env` if your SIM has a PIN
@@ -329,13 +379,17 @@ operator=Kyivstar
 cell_mcc=255 cell_mnc=3 cell_lac=... cell_cid=...
 ```
 
+The SIM800L's own netlight LED should start blinking within a few seconds of the rail coming up — if it never
+lights and `ERR modem not answering AT after rail-up` appears, see [`esp32_sim800l.md`](esp32_sim800l.md) for
+the power-chain bring-up checklist (bulk cap placement, wire gauge, battery vs. USB-only power).
+
 5. Power down when done: `modemoff`
 
 Cell tower IDs are saved to NVS and appear in `mqtt_payload` as `cell_*` and `rssi` (GSM signal 0–31).
 
-## GPRS connection test (Step 5)
+## GPRS connection test
 
-Requires Step 4 working (`modem` registers on network). Set `MQTT_BROKER_HOST` and `MQTT_BROKER_PORT` in `.env` (default port **8883** for TLS).
+Requires the modem test working (`modem` registers on network). Set `MQTT_BROKER_HOST` and `MQTT_BROKER_PORT` in `.env` (default port **8883** for TLS).
 
 ```bash
 gprs
@@ -361,11 +415,11 @@ gprs_connected=no
 mqtt_broker=203.0.113.1:8883
 ```
 
-**Note:** Step 5 tests TCP reachability only (no TLS/MQTT yet — that's Step 6). If TCP fails, check: SIM data plan active, correct public IP in `.env`, router port forward **8883** configured.
+**Note:** this tests TCP reachability only (no TLS/MQTT yet — that's next). If TCP fails, check: SIM data plan active, correct public IP in `.env`, router port forward **8883** configured.
 
-## MQTT publish test (Step 6)
+## MQTT publish test
 
-Requires Step 5 working (`gprs` reaches broker TCP). Embed your CA certificate before building:
+Requires the GPRS test working (`gprs` reaches broker TCP). Embed your CA certificate before building:
 
 ```bash
 cp ~/beekpr-certs/ca.crt certs/ca.pem
@@ -415,26 +469,44 @@ If MQTT TLS fails but `gprs` TCP works, check: `certs/ca.pem` present at build t
 
 Serial command `mqttls` tests TLS socket only (no MQTT); use it before `mqtt` when debugging.
 
+## Sleep-current audit
+
+Before field deployment, confirm actual deep-sleep draw at the battery — budget is well under ~300 µA total
+(ESP32 ~10 µA + 2× CR-SJ5530 <100 µA each + divider ~21 µA + TP4056 leakage). Put a multimeter **in series**
+with the battery's + lead (start on the mA range — boot and publish draw hundreds of mA), send `sleep`, wait for
+the board to go quiet, then step down to µA.
+
+If you see milliamps instead of microamps, the most common cause on a freshly-populated board isn't firmware —
+it's **hardwired indicator LEDs**. The sensor VCC rail (ESP32 `3V3` + all 4 NAU7802s + mux + DS3231 + DS18B20)
+is always-on, deep sleep included (see CLAUDE.md), so any board with a stock power LED soldered straight to
+that rail keeps burning current regardless of what firmware does. Check, in order:
+
+1. Generic ESP32 devkit's own onboard power LED (often labeled `PWR`, near the USB connector)
+2. Each of the 4 NAU7802 breakout boards' own power LED
+3. The DS3231 module's power LED (and CR2032 "charging" circuit, if present — shouldn't be charging a
+   non-rechargeable coin cell in the first place)
+
+None of these are under firmware control — desolder the LED (or its series resistor, generally the safer
+target) on each board that has one, with the board unpowered. Only after that does GPIO4's rail hold (modem)
+and the register power-down (sensors) reflect the true sleep budget.
+
 ## Expected serial output
 
 Calibrated:
 
 ```
-raw=108390 weight_kg=0.012 stable_kg=0.003
-raw=352426 weight_kg=8.011 stable_kg=8.008
+raw c0=32640 c1=-21660 c2=54900 c3=-49000 weight_kg=8.011 stable_kg=8.008
 ```
 
 Uncalibrated:
 
 ```
-raw=108390 weight_kg=uncalibrated
+raw c0=32640 c1=-21660 c2=54900 c3=-49000 weight_kg=uncalibrated
 ```
 
-Without the NAU7802 connected:
-
-```
-raw=not_ready
-```
+Without a corner's NAU7802 connected — `ERR NAU7802 corner N not found (mux channel M, I2C 0x2A)` at boot; that
+corner reports as not-present while the others still work (a failing corner degrades to a flagged outlier, not
+a dead device).
 
 ## Troubleshooting
 
@@ -442,8 +514,13 @@ raw=not_ready
 |---------|-----|
 | `pio: command not found` | Use `.venv/bin/pio` or run `source .venv/bin/activate` |
 | `.venv` missing | Run the one-time venv setup commands above |
-| Upload fails / no port | Install CP210x driver; try another USB cable |
+| Upload fails / no port | Install CP210x/CH340 driver; try another USB cable |
 | `WARNING: .env not found` | Run `cp .env.example .env` |
-| `raw=not_ready` always | Check 3.3 V, GND, SDA=19/SCL=18; look for `ERR NAU7802 not found` at boot |
+| Board resets/behaves oddly only on battery, fine on USB | TP4056 with no battery attached can't source the modem's boot bursts and oscillates — connect a battery (see Prerequisites) |
+| `ERR NAU7802 corner N not found` | Check that corner's wiring and the mux channel in `CORNER_MUX_CHANNEL` (config.h); run `i2cscan` |
+| `i2cscan` shows `0x70` missing | PCA9548A wiring/power; corner channels aren't scannable until it responds |
+| One corner's raw reading ramps continuously / wraps around | Floating or broken bridge input on that corner — check E+/E−/A+/A− wiring on that load cell |
 | `temp_scale_c=unavailable` | Check DS18B20 wiring (DQ=25) and the 4.7 kΩ pull-up to 3.3 V |
+| `ERR modem not answering AT after rail-up` | Battery not connected (see above); check bulk cap is soldered right at SIM800L VCC/GND; check GPIO4→`EN` wiring; SIM800L netlight LED dark = rail/module problem, blinking = UART wiring problem |
+| Sleep current in the mA range | See "Sleep-current audit" above — almost always an un-removed indicator LED |
 | Build downloads fail | Check internet; retry `.venv/bin/pio run` |

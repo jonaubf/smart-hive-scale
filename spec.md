@@ -377,8 +377,6 @@ reboot
 
 ![Wiring diagram: ESP32-WROOM-32, 4× NAU7802 + PCA9548A, DS3231, DS18B20, SIM800L, power chain](doc/smart-apiary-scale-schematic.svg)
 
-The old T-Call-based wiring (`doc/tcall_nau7802_wiring.svg`) is kept for historical reference only — not used by this build.
-
 ### ESP32-WROOM-32 GPIO map
 
 No onboard modem/PMIC on a bare WROOM-32 — no T-Call-style reserved pins. Avoided on purpose:
@@ -654,9 +652,10 @@ software correction can fully compensate for.
 
 ## 12. Implementation Plan
 
-Steps 1-11 below are the original TTGO T-Call-based v1 (retired — see §2 for why). Steps 12+ are
-the discrete-hardware rework, not yet built — the detailed, phase-by-phase firmware plan for them
-lives in [`doc/rework-implementation-plan.md`](doc/rework-implementation-plan.md).
+Steps 1-11 below are the original TTGO T-Call-based v1 (retired — see §2 for why; firmware preserved
+at the `tcall-v1` git tag). Steps 12+ are the discrete-hardware build documented throughout this spec —
+the detailed, phase-by-phase firmware and bring-up record lives in
+[`doc/rework-implementation-plan.md`](doc/rework-implementation-plan.md).
 
 | Step | Goal | Deliverable |
 |------|------|-------------|
@@ -673,11 +672,11 @@ lives in [`doc/rework-implementation-plan.md`](doc/rework-implementation-plan.md
 | 9 | Mosquitto TLS + network | [`doc/mqtt-tls-setup.md`](doc/mqtt-tls-setup.md), port forward, certs — **done** |
 | 10 | Home Assistant integration | MQTT sensors, device, availability, dashboard/automations — **done** ([`doc/user-guide.md`](doc/user-guide.md), [`doc/home-assistant/mqtt_sensors.yaml`](doc/home-assistant/mqtt_sensors.yaml)) |
 | 11 | Field hardening (T-Call v1) | Enclosure, antenna, failure diagnostics — superseded by the rework below |
-| 12 | Discrete power chain bring-up | TP4056 + 2× CR-SJ5530 verified standalone (incl. `EN`-pin switching, PS-pad standby current); ESP32 boots and holds both rails under load |
-| 13 | I2C mux bring-up | PCA9548A channel switching verified; all 4 NAU7802 respond on their own channel, DS3231 responds upstream |
-| 14 | 4-corner calibration flow | Per-corner tare + shared-span calibration implemented and portal/serial UI updated |
-| 15 | Standalone SIM800L bring-up | Modem registration/GPRS/MQTT verified on the new discrete wiring (reuses existing GSM firmware logic, new pins + `EN`-based power control) |
-| 16 | Field re-deployment | New hardware installed on the hive stand, 4-corner mounting verified, full burn-in test on battery |
+| 12 | Discrete power chain bring-up | TP4056 + 2× CR-SJ5530 verified standalone (`EN`-pin switching, PS-pad standby current); ESP32 boots and holds both rails under load; per-board battery-divider calibration — **done** |
+| 13 | I2C mux bring-up | PCA9548A channel switching verified; all 4 NAU7802 respond on channels 0/1/2/7 (`CORNER_MUX_CHANNEL`), DS3231 responds upstream — **done** |
+| 14 | 4-corner calibration flow | Per-corner tare + shared-span calibration implemented, portal/serial UI updated — **firmware done**; per-unit tare/cal execution is a deployment-time step, see [`doc/user-guide.md`](doc/user-guide.md) §3 |
+| 15 | Standalone SIM800L bring-up | Modem power-on/registration verified on the discrete wiring; before first field deployment, also verify GPRS attach + TLS MQTT publish end-to-end with `gprs` → `mqttls` → `mqtt` → `send` (see [`doc/local-setup.md`](doc/local-setup.md)) |
+| 16 | Field re-deployment | Install on the hive stand, verify 4-corner mounting, run a battery-only burn-in watching MQTT for on-schedule reports — see [`doc/user-guide.md`](doc/user-guide.md) §7 |
 
 ### Step 9 deliverable (Mosquitto + network)
 

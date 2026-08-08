@@ -1,15 +1,11 @@
-# Discrete rework — firmware implementation plan
+# Discrete rework — firmware implementation & bring-up record
 
-Step-by-step plan for implementing the discrete ESP32-WROOM-32 + 4-corner build specified in
-[spec.md](../spec.md) (§2 decisions, §6 architecture, §10 wiring). The starting point is the
-working TTGO T-Call firmware described in [CLAUDE.md](../CLAUDE.md); this plan migrates it in
-place rather than starting over — most modules (`app_scheduler`, `modem_manager`, `mqtt_client`,
-`maintenance_portal`, settings modules, the TLS patch scripts) carry over with pin/logic changes,
-not rewrites.
-
-**Ordering principle:** Phases A–D are hardware-independent — every step ends in a compiling
-build and most are bench-testable on any bare ESP32 devkit. Phase E needs the real parts. This
-lets firmware land before/while the PCB and modules are assembled.
+**Status: Phases A–D (firmware) and E1–E4 (bench bring-up) complete.** This is now a historical
+record of the migration from the retired TTGO T-Call firmware (preserved at the `tcall-v1` git
+tag) to the current discrete ESP32-WROOM-32 + 4-corner build — kept for the hard-won bring-up
+facts (EN threshold measurements, power-chain gotchas, calibration values) that aren't visible
+from the code alone. For day-to-day work on the shipped firmware, see [CLAUDE.md](../CLAUDE.md)
+and [spec.md](../spec.md) instead; this file isn't the place to look for current architecture.
 
 **Phase ↔ spec §12 mapping:** A+B → step 12 (power chain), C → steps 13–14 (mux + calibration),
 D → step 15 (SIM800L on new wiring, integration), E → steps 12/15 bench portions + step 16
@@ -167,33 +163,60 @@ corner-weight entities; delete the `Boost keep-on` binary sensor (field no longe
 4. Ideal-diode module orientation (`IN` ← CR-SJ5530 #1, `OUT` → ESP32 `3V3`) verified against
    the board silkscreen; ESP32 boots on battery; both rails hold under load.
 
-**E2. Battery divider calibration.** Measure actual Vbat with a multimeter, set
-`BATTERY_DIVIDER_RATIO` per board (T-Call precedent: ~6.6% off nominal).
+**E2. Battery divider calibration — done (2026-08-08).** Single-point calibrated on the first
+bring-up unit via the `battery` bench command against a multimeter on the raw battery node:
+old nominal ratio 2.1314 reported 4.026 V vs. 4.112 V actual ⇒ `BATTERY_DIVIDER_RATIO = 2.1769`
+(config.h). Recalibrate the same way per board — real divider resistors don't land on exactly
+2.000, matching the T-Call precedent (~6.6% off nominal there too).
 
-**E3. I2C bring-up** (spec step 13): `i2cscan` shows 0x70 + 0x68 upstream and 0x2A on each of
-channels 0, 1, 2, 7 (`CORNER_MUX_CHANNEL`). DS3231 alarm wake (`ext1` on GPIO 14) fires from
-deep sleep.
+**E3. I2C bring-up — done (2026-08-08)** (spec step 13): `i2cscan` confirmed 0x70 + 0x68
+upstream and 0x2A on all 4 of channels 0, 1, 2, 7 (`CORNER_MUX_CHANNEL`) on the first bring-up
+unit. One corner initially showed a continuously-ramping/wrapping raw reading (floating bridge
+input) — traced to a load-cell wiring fault on that corner, not a firmware or mux issue; resolved
+by fixing the E+/E−/A+/A− connection.
 
-**E4. SIM800L bring-up** (spec step 15): `modem` → `gprs` → `mqttls` → `mqtt` on the new
-wiring; `EN` power-cycle from firmware (on → registered → `CPOWD` → rail off) repeated several
-times; confirm the 1000 µF bulk cap prevents TX-burst brownouts (no mid-registration resets on
-battery).
+**E4. SIM800L bring-up — modem power-on/registration verified (2026-08-08); full chain pending.**
+`modem` succeeded end-to-end on the discrete wiring (`EN` rail-up → `AT` sync → SIM ready →
+network registered on Kyivstar, rssi=12, real cell tower IDs). Confirms the EN-based power
+control, UART divider, and bulk cap are all correctly wired. **Before first field deployment,
+still run** `gprs` → `mqttls` → `mqtt` → `send` to verify GPRS attach and TLS MQTT publish
+end-to-end — not yet exercised with a confirmed successful output on this unit.
+**Real-world gotcha found during bring-up: the TP4056 cannot power the board on its own.**
+Running on USB/TP4056 with no battery attached caused the whole supply to oscillate ~3.1–4.2 V
+and reset the board the moment the modem attempted its boot-current burst (LED never lit, looked
+exactly like a dead/miswired modem). Confirmed root cause: TP4056's current limit can't source
+the ~2 A burst; a battery buffers it. **A battery must be connected for any modem bring-up or
+sleep-current testing, USB-only is not sufficient.** Also found: Quick Charge (QC2.0/3.0) USB
+bricks are unsafe on the TP4056 input — an unrecognized-negotiation QC brick can default-boost
+past 5 V, which is out of spec for the charger IC; use a plain fixed-5V adapter. Both lessons
+folded into CLAUDE.md and `doc/esp32_sim800l.md`.
 
-**E5. Sleep-current audit.** Measure total deep-sleep draw at the battery. Budget: ESP32
-~10 µA + 2× CR-SJ5530 <100 µA each + divider ~21 µA + TP4056 leakage ⇒ expect well under
-~300 µA; anything in the mA range means a missed `PS` pad, a still-fitted LED, or GPIO4 not
-held (modem rail alive in sleep).
+**E5. Sleep-current audit — root cause found, final number pending re-verification.** Initial
+battery-only measurement (USB fully disconnected) read ~3 mA in series with the battery — an
+order of magnitude over the <300 µA budget. Root cause: **the sensor VCC rail is always-on
+through deep sleep by design** (CR-SJ5530 #1 feeds ESP32 `3V3` + all sensor VCCs directly, same
+rail the ESP32's own RTC memory needs), so `weightSensorPowerDown()`'s register-level power-down
+quiesces each NAU7802's own ADC current but cannot touch anything hardwired straight to that
+rail — specifically, the stock power-indicator LEDs on the ESP32 devkit and on all 4 NAU7802
+breakout boards, none of which are under firmware control. These must be desoldered (LED or its
+series resistor) per board — this is a hardware step, not a firmware fix, and it isn't optional
+for any unit built from off-the-shelf breakout boards. **Re-run the sleep-current measurement
+after LED removal on any new unit** before trusting it's under budget; a clean `PS`-pad short
+and GPIO4 hold (already verified in E1) get you most of the way, but a single un-removed LED
+alone can cost several mA — more than the entire rest of the budget combined.
 
 **E6. Real calibration + burn-in** (spec step 16 prep): cells mounted on the frame, tare-all +
 span with a known weight, verify per-corner sanity. Battery burn-in *without USB attached* —
 watch `mosquitto_sub` for on-schedule reports (the T-Call lesson: the serial monitor resets the
-board and fakes wakes; MQTT is the only honest observer).
+board and fakes wakes; MQTT is the only honest observer). **Not yet performed** on a
+field-mounted unit as of this record — see `doc/user-guide.md` §3/§7 for the procedure.
 
-**E7. Field deployment + docs.** Install on the hive stand; then rewrite the operator docs for
-the shipped reality: `doc/local-setup.md` (wiring, commands), `doc/user-guide.md` (4-corner
-calibration, payload), `doc/esp32_sim800l.md` (repurpose for the standalone module),
-`CLAUDE.md` (new module map, wake cycle, no IP5306 saga), `README.md` hardware list. The
-"rework in progress" banners come off everywhere in the same pass.
+**E7. Field deployment + docs — docs done (2026-08-08).** Operator docs rewritten for the shipped
+discrete-build reality: `doc/local-setup.md`, `doc/user-guide.md`, `doc/esp32_sim800l.md`
+(repurposed for the standalone module), `CLAUDE.md`, `README.md`. All "rework in progress"
+framing and TTGO/T-Call-specific instructions removed from the living doc set; the retired
+firmware remains available at the `tcall-v1` git tag for reference. **Physical field
+installation itself is still pending** — do E6 (real calibration + burn-in) first.
 
 ---
 
