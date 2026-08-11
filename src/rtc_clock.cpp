@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <RTClib.h>
+#include <Wire.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
 #include <time.h>
@@ -13,6 +14,46 @@ namespace {
 RTC_DS3231 rtc;
 bool present = false;
 bool beginAttempted = false;
+
+constexpr uint8_t DS3231_I2C_ADDR = 0x68;
+constexpr uint8_t DS3231_REG_CONTROL = 0x0E;
+
+// EOSC (control reg bit 7, active low) stops the oscillator whenever main
+// VCC is absent — the clock then silently freezes across every power-off
+// despite a good coin cell. Factory default is 0 (runs on battery), but
+// clone chips and glitched I2C writes can leave it set, so clear it on
+// every boot and verify the write stuck rather than trusting the default.
+void ensureOscillatorRunsOnBattery() {
+  Wire.beginTransmission(DS3231_I2C_ADDR);
+  Wire.write(DS3231_REG_CONTROL);
+  if (Wire.endTransmission() != 0 ||
+      Wire.requestFrom(DS3231_I2C_ADDR, uint8_t{1}) != 1) {
+    Serial.println(F("WARN DS3231 control register read failed — EOSC state unknown"));
+    return;
+  }
+  const uint8_t control = Wire.read();
+  if ((control & 0x80) == 0) {
+    return;  // oscillator already enabled on battery
+  }
+
+  Wire.beginTransmission(DS3231_I2C_ADDR);
+  Wire.write(DS3231_REG_CONTROL);
+  Wire.write(static_cast<uint8_t>(control & ~0x80));
+  Wire.endTransmission();
+
+  Wire.beginTransmission(DS3231_I2C_ADDR);
+  Wire.write(DS3231_REG_CONTROL);
+  uint8_t readBack = 0x80;
+  if (Wire.endTransmission() == 0 &&
+      Wire.requestFrom(DS3231_I2C_ADDR, uint8_t{1}) == 1) {
+    readBack = Wire.read();
+  }
+  if ((readBack & 0x80) == 0) {
+    Serial.println(F("DS3231: cleared EOSC — oscillator will keep running on coin cell"));
+  } else {
+    Serial.println(F("WARN DS3231 EOSC clear did not stick — clock will stop without main power"));
+  }
+}
 
 // Same "is this a real synced time, not the 1970 default" threshold used by
 // modemManagerSyncClock() (2023-01-01 UTC) — kept in sync deliberately so
@@ -46,6 +87,8 @@ void rtcClockBegin() {
     Serial.println(
         F("WARN DS3231 lost power (missing/dead coin cell?) — time may be wrong until synced"));
   }
+
+  ensureOscillatorRunsOnBattery();
 
   rtc.clearAlarm(2);
   rtc.disableAlarm(1);  // only Alarm2 is used
