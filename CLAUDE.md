@@ -152,7 +152,10 @@ says, since it was never under I2C/GPIO control in the first place. Confirmed on
 (2026-08-08): 4× NAU7802 board LEDs + the ESP32 devkit's own power LED cost several mA of pure idle waste, which
 alone can burn through a multi-week battery budget in a few weeks doing nothing. These have to be desoldered (or
 their series resistor pulled, or the feeding trace cut) per board — no firmware fix is possible since the LEDs
-aren't wired to anything firmware touches. Verify with a real sleep-current measurement in series with the
+aren't wired to anything firmware touches. The rework itself carries risk: on cramped modules the LED's supply
+trace can run through to the chip's own VCC — removing the DS3231 board's LED on the first unit damaged its VCC
+path (chip floating at ~2 V, whole shared bus intermittently timing out) and needed a bodge wire; verify each
+board with `i2cscan` after its rework. Then verify with a real sleep-current measurement in series with the
 battery (see spec.md §12 plan E5) after any new board is populated, before assuming `< 300 µA` sleep budget is
 met.
 

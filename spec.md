@@ -71,12 +71,12 @@ building the power chain from scratch — and is also the natural point to move 
 
 | Part | Role | Notes |
 |------|------|-------|
-| ESP32-WROOM-32 dev board | MCU | No PSRAM needed — plain WROOM, not WROVER |
+| ESP32-WROOM-32 dev board | MCU | No PSRAM needed — plain WROOM, not WROVER. **Desolder the onboard power LED** (see "Indicator LEDs must be removed" below) |
 | SIM800L module | GSM/GPRS modem | Standalone, **VBAT 3.4–4.4 V (4.0 V recommended)** — not integrated onto the MCU board. **Not 5 V-tolerant**: absolute max VBAT is 4.5 V per datasheet (`doc/Datasheet_SIM800L.pdf` Table 41); exceeding it causes permanent damage |
 | 4× Zemic-family 40 kg load cell (e.g. `L6D-G3-40kg-3B-D41`) | Weight sensor | C3 class, 1.905 mV/V @ 10 VDC excitation; one per hive corner; 5-wire incl. shield — see `doc/load_cell_certificate.jpg` |
-| 4× Adafruit/SparkFun NAU7802 module | 24-bit ADC | I2C 0x2A (fixed address) — one per load cell |
+| 4× Adafruit/SparkFun NAU7802 module | 24-bit ADC | I2C 0x2A (fixed address) — one per load cell. **Desolder each board's power LED** (see "Indicator LEDs must be removed" below) |
 | PCA9548A module | I2C multiplexer | 8-channel; isolates the 4 same-address NAU7802s onto separate channels |
-| DS3231 module | Precision RTC | I2C 0x68; drives the wall-clock-aligned wake schedule; fit a CR2032 for power-loss backup |
+| DS3231 module | Precision RTC | I2C 0x68; drives the wall-clock-aligned wake schedule; fit a CR2032 for power-loss backup. **Desolder the power LED, and on ZS-042-style boards also remove the CR2032 charging circuit** (a 200 Ω resistor + diode from VCC — it wastes power and shouldn't charge a non-rechargeable cell). See "Indicator LEDs must be removed" below |
 | DS18B20 | Scale-frame temperature | OneWire, 4.7 kΩ pull-up |
 | TP4056 module | Li-Ion charger | USB input; battery and system load share its output node |
 | 2× CR-SJ5530 buck-boost module | Regulated power rails | Fixed **5 V / 4.2 V / 3.3 V** output taps (not continuously adjustable — confirm the selection method, jumper/switch/pad, against your actual unit's markings), no auto-shutoff logic; one on its **3.3 V** tap (logic + sensors), one on its **4.2 V** tap (modem — SIM800L's VBAT range; the 5 V tap exceeds its 4.5 V absolute max, the 3.3 V tap undershoots its 3.4 V minimum). **Both units: short the `PS` pad and remove the onboard indicator LED** — per the module's own wiring instructions, standard standby current is "a few mA to dozens of mA," which without this drops to <100 µA. This is not optional on CR-SJ5530 #1, which stays powered through every deep sleep to keep the ESP32 alive — unaddressed, its own idle draw alone could consume most of the 2–4 week battery budget |
@@ -90,6 +90,23 @@ building the power chain from scratch — and is also the natural point to move 
 | Modem power control: **GPIO4 → CR-SJ5530 #2's `EN` pin** (possibly through a small series resistor) | Modem power on/off | This board's `PWRKEY` is tied to GND internally (not exposed) — the only way to power-cycle the modem is to switch CR-SJ5530 #2 itself off, not just gate its output. `EN` low disables the whole module. **Bench-verified (2026-07-29)** — `EN` is held high by an internal `VIN —620 kΩ— EN —1.1 MΩ— GND` divider (floats at ≈0.64×VIN, so the enable threshold is below ~1.9 V); ESP32's 3.3 V high clears it across the whole battery range, GPIO low sinks only ~7 µA to disable, and the rail stays off through deep sleep with the GPIO hold. Connect GPIO4 **directly or via ≤1 kΩ** — a large series resistor would weaken the off level against the 620 kΩ pull-up. See §10 SIM800L wiring |
 | GSM antenna | 2G RF | Mount outside enclosure |
 | Nano SIM | GPRS data | 2G-enabled Ukrainian carrier |
+
+### Indicator LEDs must be removed (required assembly step, not an optimization)
+
+Every stock power-indicator LED on the always-on 3.3 V rail must be physically removed during assembly:
+the **ESP32 devkit's power LED**, **all 4 NAU7802 boards' LEDs**, the **DS3231 module's LED** (plus its
+CR2032 charging circuit), and **both CR-SJ5530s' LEDs** (alongside their `PS`-pad shorts). That rail stays
+powered through every deep sleep — it keeps the ESP32's RTC memory alive — and these LEDs are hardwired to
+VCC with no I2C/GPIO control, so no firmware setting can turn them off. Confirmed on the first bring-up
+unit (2026-08-08): the un-removed LEDs together cost several mA of continuous idle draw, an order of
+magnitude over the < 300 µA sleep budget (NFR-1) — enough to drain a multi-week battery in days of doing
+nothing. Desolder the LED or its series resistor (the resistor is usually the safer rework target).
+
+**Rework carefully and verify after each board:** on cramped modules the LED's supply trace can run
+through to the chip itself — on the first unit, removing the DS3231 board's LED damaged the module's VCC
+path (rail at the chip read a floating ~2–2.4 V, whole shared I2C bus intermittently dead) and needed a
+bodge wire to repair. After each board's rework, power up and check `i2cscan` before moving to the next,
+and finish with the full sleep-current audit (§12 plan E5, `doc/local-setup.md`).
 
 ### Recommended
 

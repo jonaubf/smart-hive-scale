@@ -118,6 +118,19 @@ Extension workflow:
 Full BOM, mechanical notes, and power-chain wiring: [spec.md §5/§10](../spec.md#10-hardware-connections).
 SIM800L-specific wiring/bring-up: [`esp32_sim800l.md`](esp32_sim800l.md).
 
+### Board prep before assembly — remove every indicator LED
+
+**Required, not optional** (spec.md §5 "Indicator LEDs must be removed"): desolder the stock power LED (or
+its series resistor) from the **ESP32 devkit**, **all 4 NAU7802 boards**, the **DS3231 module** (plus its
+CR2032 charging circuit on ZS-042-style boards), and **both CR-SJ5530s** (with their `PS`-pad shorts). They
+all sit on the always-on 3.3 V rail, outside any firmware control, and together burn several mA through
+every deep sleep — an order of magnitude over the whole < 300 µA sleep budget.
+
+Rework with the board unpowered, and **verify each board still responds (`i2cscan`) before doing the
+next** — on cramped modules the LED trace can run through to the chip's own VCC (this bit the first unit's
+DS3231: a damaged trace left its VCC floating at ~2 V and took the whole shared bus down intermittently,
+needing a bodge wire). Finish with the sleep-current audit below.
+
 ### ESP32-WROOM-32 GPIO map
 
 Bare devkit — no onboard modem/PMIC, so the only pins to avoid are the universal ESP32 ones (strapping 0/2/12/15,
@@ -487,8 +500,10 @@ that rail keeps burning current regardless of what firmware does. Check, in orde
    non-rechargeable coin cell in the first place)
 
 None of these are under firmware control — desolder the LED (or its series resistor, generally the safer
-target) on each board that has one, with the board unpowered. Only after that does GPIO4's rail hold (modem)
-and the register power-down (sensors) reflect the true sleep budget.
+target) on each board that has one, with the board unpowered; this is the same required prep step described
+under "Board prep before assembly" above, including the verify-with-`i2cscan`-after-each-board caution.
+Only after that does GPIO4's rail hold (modem) and the register power-down (sensors) reflect the true sleep
+budget.
 
 ## Expected serial output
 
