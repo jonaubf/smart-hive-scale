@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include <Wire.h>
+#include <driver/gpio.h>
 #include <math.h>
 #include <stdio.h>
 
@@ -9,7 +11,7 @@
 #include "connectivity_mode.h"
 #include "device_settings.h"
 #include "gsm_settings.h"
-#include "ip5306.h"
+#include "i2c_mux.h"
 #include "maintenance_portal.h"
 #include "modem_manager.h"
 #include "mqtt_client.h"
@@ -66,19 +68,19 @@ void printBanner() {
   Serial.println();
   Serial.println(F("=== Smart Hive Scale ==="));
   Serial.printf("Device ID: %s\n", DEVICE_ID);
-  Serial.printf("NAU7802: I2C 0x2A, gain 128, 10 SPS (SDA=%d SCL=%d)\n",
-                PIN_SCALE_I2C_SDA, PIN_SCALE_I2C_SCL);
+  Serial.printf("NAU7802 x%u: I2C 0x2A behind PCA9548A 0x%02X ch", NUM_CORNERS, I2C_MUX_ADDR);
+  for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+    Serial.printf("%c%u", corner == 0 ? ' ' : '/', CORNER_MUX_CHANNEL[corner]);
+  }
+  Serial.printf(" (bus SDA=%d SCL=%d)\n", PIN_I2C_SDA, PIN_I2C_SCL);
   Serial.printf("DS18B20: OneWire GPIO %d (4.7k pull-up to 3.3V)\n",
                 PIN_TEMP_ONEWIRE);
-  Serial.printf("IP5306: I2C 0x75 SDA=%d SCL=%d boost_keep_on=%s SYS_CTL0=0x%02X\n",
-                PIN_PMIC_SDA, PIN_PMIC_SCL,
-                ip5306BoostKeepOnOk() ? "yes" : "no", ip5306SysCtl0());
   rtcClockShow();
   Serial.printf("Setup button: GPIO %d (hold 10s for config portal)\n", PIN_SETUP_BUTTON);
   Serial.println(
       F("Commands: tare | cal <kg> | show | reset | setint <min> | setcell <mcc> <mnc> <lac> <cid>"));
   Serial.println(
-      F("           setmode gsm|wifi | setwificred <ssid> <pass> | wificonn | modem | gprs | mqttls | mqtt | send | sleep | modemoff | i2cscan | portal | reboot"));
+      F("           setmode gsm|wifi | setwificred <ssid> <pass> | wificonn | modem | gprs | mqttls | mqtt | send | sleep | modemoff | battery | i2cscan | portal | reboot"));
   Serial.println();
   connectivityShow();
   gsmSettingsShow();
@@ -98,34 +100,45 @@ void pushWeightSample(float weightKg) {
   weightHistory[SCALE_DISPLAY_MEDIAN_COUNT - 1] = weightKg;
 }
 
-void printReading(const WeightSensorReading &reading) {
+void printReading(const ScaleReading &reading) {
+  String rawLine = "raw";
+  for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+    rawLine += " c";
+    rawLine += String(corner);
+    rawLine += '=';
+    rawLine += reading.cornerOk[corner] ? String(reading.cornerRaw[corner])
+                                        : String("not_ready");
+  }
+
   if (!reading.ok) {
-    Serial.println(F("raw=not_ready"));
+    Serial.println(rawLine);
     return;
   }
 
   if (!calibrationIsReady()) {
-    Serial.printf("raw=%ld weight_kg=uncalibrated\n", reading.raw);
+    Serial.printf("%s weight_kg=uncalibrated\n", rawLine.c_str());
     return;
   }
 
-  const float weightKg = calibrationWeightKg(reading.raw);
-  pushWeightSample(weightKg);
+  pushWeightSample(reading.totalKg);
   const float stableKg =
       calibrationWeightKgMedian(weightHistory, weightHistoryCount);
   const float tempScaleC = tempSensorReadC();
   const float batteryV = batterySensorVoltage();
   const int batteryPct = batterySensorPercent();
 
-  Serial.printf("raw=%ld weight_kg=%.3f stable_kg=%.3f\n", reading.raw, weightKg,
-                stableKg);
+  Serial.println(rawLine);
+  Serial.print(F("corners_kg"));
+  for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+    Serial.printf(" c%u=%.3f", corner, reading.cornerKg[corner]);
+  }
+  Serial.printf(" weight_kg=%.3f stable_kg=%.3f\n", reading.totalKg, stableKg);
   if (isnan(tempScaleC)) {
     Serial.println(F("temp_scale_c=unavailable"));
   } else {
     Serial.printf("temp_scale_c=%.2f\n", tempScaleC);
   }
-  Serial.printf("battery_v=%.3f battery_pct=%d boost_keep_on=%s\n", batteryV,
-                batteryPct, ip5306BoostKeepOnOk() ? "yes" : "no");
+  Serial.printf("battery_v=%.3f battery_pct=%d\n", batteryV, batteryPct);
   const CellTowerInfo cell = gsmSettingsCellTower();
   const WifiLinkInfo wifi = wifiManagerStatus();
   const int gsmRssi =
@@ -136,8 +149,8 @@ void printReading(const WeightSensorReading &reading) {
                   wifi.ip[0] != '\0' ? wifi.ip : "-", wifi.rssi);
   }
   const String payload = buildTelemetryJson(
-      DEVICE_ID, weightKg, stableKg, tempScaleC, batteryV, batteryPct,
-      ip5306BoostKeepOnOk(), gsmRssi, cell, wifi, settingsTxIntervalSec(),
+      DEVICE_ID, reading.totalKg, stableKg, reading.cornerKg, tempScaleC,
+      batteryV, batteryPct, gsmRssi, cell, wifi, settingsTxIntervalSec(),
       rtcClockNowIso8601());
   Serial.printf("mqtt_payload=%s\n", payload.c_str());
 }
@@ -150,7 +163,11 @@ void handleCommand(const String &line) {
 
   if (line == "tare") {
     if (calibrationTare()) {
-      Serial.printf("OK tare offset=%ld\n", calibrationOffset());
+      Serial.print(F("OK tare offsets"));
+      for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+        Serial.printf(" c%u=%ld", corner, calibrationOffset(corner));
+      }
+      Serial.println();
       weightHistoryCount = 0;
     } else {
       Serial.println(F("ERR tare failed"));
@@ -220,8 +237,48 @@ void handleCommand(const String &line) {
     return;
   }
 
+  if (line == "battery") {
+    // Single-point divider calibration (plan E2): compare against a
+    // multimeter on the raw battery node and scale BATTERY_DIVIDER_RATIO.
+    const float batteryV = batterySensorVoltage();
+    Serial.printf("battery_v=%.3f battery_pct=%d divider_ratio=%.4f\n",
+                  batteryV, batterySensorPercent(), BATTERY_DIVIDER_RATIO);
+    Serial.println(
+        F("calibrate: BATTERY_DIVIDER_RATIO = divider_ratio * V_multimeter / battery_v (config.h)"));
+    return;
+  }
+
   if (line == "i2cscan") {
-    ip5306ScanBus();
+    // Upstream scan first (expect PCA9548A 0x70 + DS3231 0x68), then probe
+    // each mux channel for its corner's NAU7802 (0x2A). The step-13
+    // bring-up tool (doc/rework-implementation-plan.md E3).
+    Serial.printf("I2C scan (SDA=%d SCL=%d):\n", PIN_I2C_SDA, PIN_I2C_SCL);
+    i2cMuxDeselectAll();
+    uint8_t found = 0;
+    for (uint8_t addr = 1; addr < 127; addr++) {
+      Wire.beginTransmission(addr);
+      if (Wire.endTransmission() == 0) {
+        Serial.printf("  found 0x%02X\n", addr);
+        found++;
+      }
+    }
+    if (found == 0) {
+      Serial.println(F("  no devices found — check wiring/pull-ups"));
+    }
+    if (!i2cMuxIsPresent()) {
+      Serial.printf("  PCA9548A 0x%02X missing — corner channels not scannable\n",
+                    I2C_MUX_ADDR);
+      return;
+    }
+    for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+      const uint8_t channel = CORNER_MUX_CHANNEL[corner];
+      i2cMuxSelect(channel);
+      Wire.beginTransmission(0x2A);
+      const bool nauFound = Wire.endTransmission() == 0;
+      Serial.printf("  corner %u (mux ch%u): NAU7802 0x2A %s\n", corner, channel,
+                    nauFound ? "found" : "MISSING");
+    }
+    i2cMuxDeselectAll();
     return;
   }
 
@@ -319,13 +376,13 @@ void handleCommand(const String &line) {
       return;
     }
 
-    if (calibrationOffset() == 0 && !calibrationIsReady()) {
+    if (!calibrationHasTare()) {
       Serial.println(F("ERR run tare first"));
       return;
     }
 
     if (calibrationCalibrate(knownKg)) {
-      Serial.printf("OK cal scale=%.3f\n", calibrationScale());
+      Serial.printf("OK cal span=%.3f\n", calibrationScale());
       weightHistoryCount = 0;
     } else {
       Serial.println(F("ERR cal failed"));
@@ -381,27 +438,19 @@ void pollSerialCommands() {
 }  // namespace
 
 void setup() {
+  // Modem rail off before anything else: CR-SJ5530 #2's EN is enabled by
+  // default and GPIO4 floats through boot, so the SIM800L rail is up (and
+  // the module auto-booting) from power-on until this runs (spec.md §10).
+  // Release the previous sleep's latch first so the write takes effect.
+  gpio_hold_dis(static_cast<gpio_num_t>(PIN_MODEM_EN));
+  pinMode(PIN_MODEM_EN, OUTPUT);
+  digitalWrite(PIN_MODEM_EN, LOW);
+
   Serial.begin(115200);
 
   const WakeCause wakeCause = appSchedulerWakeCause();
-
-  // Cheapest possible path first: an intermediate IP5306-keepalive pulse
-  // (see app_scheduler.cpp — battery deep sleep is split into short chunks
-  // so the PMIC's 5V boost never sees enough idle time to auto-shut-off).
-  // These happen every ~25s for hours, so skip NVS/sensor/radio init
-  // entirely and go straight back to sleep — full init here would turn the
-  // "sleep" into a near-continuous power draw and defeat the purpose. Only
-  // probe the DS3231 (cheap, ~ms) to tell a keepalive pulse apart from the
-  // DS3231-absent fallback case, where a Timer wake IS the scheduled report.
-  if (wakeCause == WakeCause::Timer) {
-    rtcClockBegin();
-    if (rtcClockIsPresent()) {
-      appSchedulerContinueKeepaliveSleep();
-      // does not return
-    }
-    // DS3231 absent: this Timer wake is the scheduled report (fallback
-    // mode, no chunking) — fall through to full init below.
-  }
+  // Timer wake only exists in the DS3231-absent fallback, where it IS the
+  // scheduled report — handled by the normal dispatch below.
 
   delay(1000);
 
@@ -410,11 +459,11 @@ void setup() {
   gsmSettingsBegin();
   mqttSettingsBegin();
 
-  // PMIC on Wire/I2C0 GPIO 21/22 (LilyGO path). NAU7802 uses Wire1.
-  if (!ip5306EnsureBoostKeepOn()) {
-    Serial.println(F("WARN: battery deep sleep may shut the board off after ~32s"));
-  }
-  rtcClockBegin();  // idempotent — no-op if the fast path above already ran it
+  // Single shared I2C bus: PCA9548A mux + DS3231 upstream, NAU7802s behind
+  // the mux channels.
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  i2cMuxBegin();
+  rtcClockBegin();
 
   weightSensorBegin();
   tempSensorBegin();
@@ -494,7 +543,7 @@ void loop() {
     return;
   }
 
-  WeightSensorReading reading = weightSensorReadRaw(SCALE_RAW_SAMPLES);
+  const ScaleReading reading = calibrationReadAll(SCALE_LIVE_SAMPLES);
   printReading(reading);
 
   delay(SCALE_READ_INTERVAL_MS);

@@ -1,39 +1,39 @@
 #pragma once
 
-// TTGO T-Call — onboard SIM800L (do not use for other peripherals)
-constexpr int PIN_MODEM_TX = 27;       // ESP32 TX -> modem RX
-constexpr int PIN_MODEM_RX = 26;       // ESP32 RX <- modem TX
-constexpr int PIN_MODEM_PWRKEY = 4;
-constexpr int PIN_MODEM_RST = 5;
-constexpr int PIN_MODEM_POWER = 23;
-// V1.4 only (not wired on V1.3, which is why this bit us once already —
-// picked GPIO 32 for PIN_RTC_ALARM below before realizing it's actually
-// modem DTR on V1.4): GPIO 32 = MODEM DTR, GPIO 33 = MODEM RI, unused by
-// this firmware but physically traced to the modem regardless. V1.4 also
-// adds an onboard LED on GPIO 13 — same pin this project already uses for
-// PIN_SETUP_BUTTON; not yet confirmed whether that's a real conflict.
-// Treat 32, 33, and (unconfirmed) 13 as reserved on V1.4 boards.
+// Discrete ESP32-WROOM-32 build (spec.md §10). Bare devkit — no onboard
+// modem/PMIC, so no board-specific reserved pins. Avoid only the universal
+// ESP32 ones: strapping pins 0/2/12/15, UART0 1/3, internal flash 6-11.
 
-// IP5306 PMIC I2C — reserved
-constexpr int PIN_PMIC_SDA = 21;
-constexpr int PIN_PMIC_SCL = 22;
+// SIM800L over UART2 (TX2/RX2 silk labels on 30-pin devkits).
+constexpr int PIN_MODEM_TX = 17;  // ESP32 TX2 -> SIM800L RXD, via 1k series + 5.6k shunt divider (3.3V -> ~2.8V)
+constexpr int PIN_MODEM_RX = 16;  // ESP32 RX2 <- SIM800L TXD, via 1k series (protection only)
 
-// NAU7802 load cell ADC on a dedicated I2C bus (GPIO 21/22 belong to the
-// IP5306 PMIC). Address 0x2A, powered from 3.3 V.
-constexpr int PIN_SCALE_I2C_SDA = 19;
-constexpr int PIN_SCALE_I2C_SCL = 18;
+// This SIM800L board has no PWRKEY pin (tied to GND internally — the module
+// auto-boots the moment VCC appears). Power control is at the rail instead:
+// GPIO 4 drives CR-SJ5530 #2's EN pin (EN low = whole converter off).
+// RTC-domain pin — must be latched low with gpio_hold_en() through deep
+// sleep, or it floats, EN re-enables, and the modem drains the battery all
+// through the sleep window (spec.md §10).
+constexpr int PIN_MODEM_EN = 4;
+constexpr int PIN_MODEM_RST = 5;  // active low; emergency reset only (normal power-off is AT+CPOWD=1 + EN low)
+
+// Single shared I2C bus: PCA9548A mux (0x70) and DS3231 (0x68) upstream,
+// 4x NAU7802 (all fixed at 0x2A) behind mux channels CORNER_MUX_CHANNEL
+// (config.h — currently 0/1/2/7 as wired).
+constexpr int PIN_I2C_SDA = 21;
+constexpr int PIN_I2C_SCL = 22;
 
 // DS18B20 scale/frame temperature, OneWire with external 4.7 kOhm pull-up
 // from DQ to 3.3 V.
 constexpr int PIN_TEMP_ONEWIRE = 25;
 
-// Battery voltage sense (ADC1, input-only)
+// Battery voltage sense (ADC1, input-only) — external 100k/100k divider
+// from the raw battery node, ratio calibrated per board (config.h).
 constexpr int PIN_BATTERY_ADC = 35;
 
 // Setup / config portal button (NO to GND, internal pull-up)
 constexpr int PIN_SETUP_BUTTON = 13;
 
-// DS3231 RTC alarm (SQW/INT), open-drain with the module's own pull-up.
-// DS3231 itself shares the IP5306 I2C bus above (GPIO 21/22), address 0x68.
-// GPIO 14: free on both V1.3 and V1.4, not a boot-strapping pin.
+// DS3231 RTC alarm (SQW/INT), open-drain with the module's own pull-up;
+// ext1 deep-sleep wake for the report schedule.
 constexpr int PIN_RTC_ALARM = 14;

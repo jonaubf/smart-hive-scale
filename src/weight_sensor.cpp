@@ -4,15 +4,26 @@
 #include <Wire.h>
 
 #include "config.h"
+#include "i2c_mux.h"
 #include "pins.h"
 
 namespace {
 
 constexpr unsigned long NAU7802_READY_TIMEOUT_MS = 1500;
-constexpr uint8_t NAU7802_MEDIAN_MAX_SAMPLES = 31;
 
+// One driver object serves all 4 chips: they are configured identically and
+// the object holds no per-chip state — the mux decides which physical
+// NAU7802 each I2C transaction reaches.
 NAU7802 scale;
-bool sensorPresent = false;
+bool cornerPresent[NUM_CORNERS] = {};
+bool anyPresent = false;
+
+bool selectCorner(uint8_t corner) {
+  if (corner >= NUM_CORNERS) {
+    return false;
+  }
+  return i2cMuxSelect(CORNER_MUX_CHANNEL[corner]);
+}
 
 bool waitForConversion(unsigned long timeoutMs) {
   const unsigned long deadline = millis() + timeoutMs;
@@ -35,8 +46,9 @@ void powerCycle() {
   delay(100);
 }
 
-bool readSingle(long &rawOut) {
-  if (!sensorPresent) {
+// Read one conversion from the currently-selected corner.
+bool readSingleOnSelected(uint8_t corner, long &rawOut) {
+  if (!cornerPresent[corner]) {
     return false;
   }
   if (!waitForConversion(NAU7802_READY_TIMEOUT_MS)) {
@@ -51,54 +63,62 @@ bool readSingle(long &rawOut) {
   return true;
 }
 
-long medianSorted(long *values, uint8_t count) {
-  for (uint8_t i = 1; i < count; i++) {
-    const long key = values[i];
-    int j = static_cast<int>(i) - 1;
-    while (j >= 0 && values[j] > key) {
-      values[j + 1] = values[j];
-      j--;
-    }
-    values[j + 1] = key;
+bool beginCorner(uint8_t corner) {
+  if (!selectCorner(corner)) {
+    return false;
   }
-  return values[count / 2];
-}
-
-}  // namespace
-
-bool weightSensorBegin() {
-  // Wire1 = dedicated bus for the scale ADC (Wire/I2C0 is reserved for IP5306).
-  Wire1.begin(PIN_SCALE_I2C_SDA, PIN_SCALE_I2C_SCL);
-
-  sensorPresent = scale.begin(Wire1);
-  if (!sensorPresent) {
-    Serial.println(F("ERR NAU7802 not found on I2C 0x2A — check wiring"));
+  if (!scale.begin(Wire)) {
     return false;
   }
 
   // Internal LDO excites the bridge; 3.0 V leaves headroom below the 3.3 V
-  // supply. Gain 128 matches the previous HX711 channel-A setup; 10 SPS
-  // trades speed for noise.
+  // supply. Gain 128, 10 SPS trades speed for noise.
   scale.setLDO(NAU7802_LDO_3V0);
   scale.setGain(NAU7802_GAIN_128);
   scale.setSampleRate(NAU7802_SPS_10);
   // Re-calibrate the analog front end after changing LDO/gain/sample rate.
   scale.calibrateAFE();
 
+  cornerPresent[corner] = true;
+
   // The first conversions after power-up/AFE calibration are off and would
   // corrupt averages (the chip is power-cycled by deep sleep).
   long discard = 0;
   for (uint8_t i = 0; i < SCALE_WARMUP_READS; i++) {
-    if (!readSingle(discard)) {
+    if (!readSingleOnSelected(corner, discard)) {
       break;
     }
   }
   return true;
 }
 
-WeightSensorReading weightSensorReadRaw(uint8_t samples) {
+}  // namespace
+
+bool weightSensorBegin() {
+  anyPresent = false;
+  for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+    cornerPresent[corner] = false;
+    if (beginCorner(corner)) {
+      anyPresent = true;
+    } else {
+      Serial.printf("ERR NAU7802 corner %u not found (mux channel %u, I2C 0x2A)\n",
+                    corner, CORNER_MUX_CHANNEL[corner]);
+    }
+  }
+  i2cMuxDeselectAll();
+  return anyPresent;
+}
+
+bool weightSensorCornerPresent(uint8_t corner) {
+  return corner < NUM_CORNERS && cornerPresent[corner];
+}
+
+WeightSensorReading weightSensorReadCornerRaw(uint8_t corner, uint8_t samples) {
   WeightSensorReading result{false, 0};
 
+  if (corner >= NUM_CORNERS || !cornerPresent[corner] || !selectCorner(corner)) {
+    return result;
+  }
   if (samples == 0) {
     samples = 1;
   }
@@ -106,11 +126,13 @@ WeightSensorReading weightSensorReadRaw(uint8_t samples) {
   long value = 0;
   long long sum = 0;
   for (uint8_t i = 0; i < samples; i++) {
-    if (!readSingle(value)) {
+    if (!readSingleOnSelected(corner, value)) {
+      i2cMuxDeselectAll();
       return result;
     }
     sum += value;
   }
+  i2cMuxDeselectAll();
 
   result.raw = static_cast<long>(sum / samples);
   result.ok = true;
@@ -118,36 +140,11 @@ WeightSensorReading weightSensorReadRaw(uint8_t samples) {
 }
 
 void weightSensorPowerDown() {
-  if (!sensorPresent) {
-    return;
-  }
-  // Register-controlled power-down (~200 nA); survives ESP32 deep sleep
-  // because the setting lives in the NAU7802, not in a GPIO level.
-  scale.powerDown();
-}
-
-WeightSensorReading weightSensorReadRawMedian(uint8_t samples, uint8_t warmupReads) {
-  WeightSensorReading result{false, 0};
-
-  if (samples == 0 || samples > NAU7802_MEDIAN_MAX_SAMPLES) {
-    return result;
-  }
-
-  long value = 0;
-  for (uint8_t i = 0; i < warmupReads; i++) {
-    if (!readSingle(value)) {
-      return result;
+  for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+    if (!cornerPresent[corner] || !selectCorner(corner)) {
+      continue;
     }
+    scale.powerDown();
   }
-
-  long values[NAU7802_MEDIAN_MAX_SAMPLES];
-  for (uint8_t i = 0; i < samples; i++) {
-    if (!readSingle(values[i])) {
-      return result;
-    }
-  }
-
-  result.raw = medianSorted(values, samples);
-  result.ok = true;
-  return result;
+  i2cMuxDeselectAll();
 }

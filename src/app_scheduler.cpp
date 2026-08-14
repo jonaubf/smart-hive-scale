@@ -1,14 +1,15 @@
 #include "app_scheduler.h"
 
 #include <Arduino.h>
+#include <driver/gpio.h>
 #include <driver/uart.h>
 #include <esp_sleep.h>
 
 #include "config.h"
 #include "device_settings.h"
-#include "ip5306.h"
 #include "modem_manager.h"
 #include "mqtt_client.h"
+#include "pins.h"
 #include "radio_manager.h"
 #include "rtc_clock.h"
 #include "setup_button.h"
@@ -67,6 +68,14 @@ bool waitForSensorWarmup() {
   esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_ON);
   esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
 
+  // Latch the modem rail enable low through deep sleep. Normal GPIO output
+  // state is released on sleep entry; unheld, PIN_MODEM_EN floats and
+  // CR-SJ5530 #2's EN (enabled by default) brings the SIM800L rail back up
+  // for the whole sleep window — the #1 battery drain hazard of this design
+  // (spec.md §10). modemManagerPowerOff() has already driven it low.
+  gpio_hold_en(static_cast<gpio_num_t>(PIN_MODEM_EN));
+  gpio_deep_sleep_hold_en();
+
   setupButtonPrepareDeepSleepWakeup();
 
   Serial.flush();
@@ -114,9 +123,6 @@ bool appSchedulerRunPublishCycle() {
 void appSchedulerEnterDeepSleep() {
   const unsigned long intervalSec = settingsTxIntervalSec();
 
-  ip5306EnsureBoostKeepOn();
-
-  bool armShortTimer = false;
   if (rtcClockIsPresent()) {
     // Opportunistic: cheap, and picks up a fresh network/NTP-synced system
     // clock whenever one is available (GSM mode syncs it during MQTT
@@ -125,16 +131,10 @@ void appSchedulerEnterDeepSleep() {
     Serial.printf("Entering deep sleep, next report at next %lus wall-clock boundary\n",
                   intervalSec);
     rtcClockSetNextAlignedAlarm(intervalSec);
-    armShortTimer = !ip5306BoostKeepOnOk();
-    if (armShortTimer) {
-      Serial.printf(
-          "IP5306 keep-on unverified — also waking every %lus to keep the rail alive\n",
-          IP5306_KEEPALIVE_CHUNK_SEC);
-    }
   } else {
     Serial.printf(
         "ERR DS3231 not found — falling back to internal timer, next report in %lus "
-        "(not wall-clock aligned, no IP5306 keepalive protection)\n",
+        "(not wall-clock aligned)\n",
         intervalSec);
   }
 
@@ -144,28 +144,9 @@ void appSchedulerEnterDeepSleep() {
 
   if (rtcClockIsPresent()) {
     rtcClockPrepareDeepSleepWakeup();
-    if (armShortTimer) {
-      esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(IP5306_KEEPALIVE_CHUNK_SEC) *
-                                    1000000ULL);
-    }
   } else {
     esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(intervalSec) * 1000000ULL);
   }
-
-  powerDomainsAndSleep();
-}
-
-void appSchedulerContinueKeepaliveSleep() {
-  Serial.println(F("IP5306 keepalive pulse"));
-  Serial.flush();
-  // Stay awake briefly so bus load / ESP current resets the IP5306 32 s timer.
-  delay(500);
-  ip5306EnsureBoostKeepOn();  // retry — may recover
-
-  rtcClockPrepareDeepSleepWakeup();  // DS3231 alarm target is untouched — it
-                                     // keeps counting down in its own
-                                     // hardware regardless of ESP32 sleep state.
-  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(IP5306_KEEPALIVE_CHUNK_SEC) * 1000000ULL);
 
   powerDomainsAndSleep();
 }

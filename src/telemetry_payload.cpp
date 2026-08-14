@@ -2,6 +2,7 @@
 
 #include <math.h>
 
+#include "config.h"
 #include "wifi_manager.h"
 
 namespace {
@@ -23,12 +24,13 @@ void jsonAppendEscapedString(String &json, const char *value) {
 }  // namespace
 
 String buildTelemetryJson(const char *deviceId, float weightKg, float stableKg,
-                          float tempScaleC, float batteryV, int batteryPct,
-                          bool boostKeepOn, int gsmRssi, const CellTowerInfo &cell,
+                          const float *cornersKg, float tempScaleC,
+                          float batteryV, int batteryPct,
+                          int gsmRssi, const CellTowerInfo &cell,
                           const WifiLinkInfo &wifi, unsigned long txIntervalSec,
                           const String &reportTimeIso8601) {
   String json;
-  json.reserve(420);
+  json.reserve(512);
   json += "{";
   json += "\"device_id\":";
   jsonAppendEscapedString(json, deviceId);
@@ -42,6 +44,16 @@ String buildTelemetryJson(const char *deviceId, float weightKg, float stableKg,
   json += String(weightKg, 3);
   json += ",\"stable_kg\":";
   json += String(stableKg, 3);
+  for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+    json += ",\"corner";
+    json += String(corner + 1);
+    json += "_kg\":";
+    if (cornersKg == nullptr || isnan(cornersKg[corner])) {
+      json += "null";
+    } else {
+      json += String(cornersKg[corner], 3);
+    }
+  }
   json += ",\"temp_scale_c\":";
   if (isnan(tempScaleC)) {
     json += "null";
@@ -52,8 +64,6 @@ String buildTelemetryJson(const char *deviceId, float weightKg, float stableKg,
   json += String(batteryV, 3);
   json += ",\"battery_pct\":";
   json += String(batteryPct);
-  json += ",\"boost_keep_on\":";
-  json += boostKeepOn ? "true" : "false";
   json += ",\"rssi\":";
   json += String(gsmRssi);
   json += ",\"wifi_connected\":";

@@ -11,6 +11,10 @@ struct WifiLinkInfo {
 
 void wifiManagerBegin();
 bool wifiManagerConnect(unsigned long timeoutMs = 15000);
+// SNTP → system clock, so rtcClockSyncFromSystemTimeIfNeeded() can write a
+// trustworthy time into the DS3231 at sleep entry — WiFi mode's counterpart
+// to modemManagerSyncClock(). Call after a successful STA connect.
+bool wifiManagerSyncClock();
 void wifiManagerDisconnect();
 void wifiManagerLoop();
 bool wifiManagerIsConnected();

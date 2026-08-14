@@ -12,7 +12,6 @@
 #include "config.h"
 #include "gsm_settings.h"
 #include "mqtt_settings.h"
-#include "ip5306.h"
 #include "pins.h"
 #include "setup_button.h"
 
@@ -184,22 +183,13 @@ bool readCellLocation(CellTowerInfo *cell) {
   return false;
 }
 
-void pulseModemPowerKey() {
-  digitalWrite(PIN_MODEM_PWRKEY, HIGH);
-  delay(100);
-  digitalWrite(PIN_MODEM_PWRKEY, LOW);
-  delay(1000);
-  digitalWrite(PIN_MODEM_PWRKEY, HIGH);
-}
-
 void configureModemPins() {
   pinMode(PIN_MODEM_RST, OUTPUT);
-  pinMode(PIN_MODEM_PWRKEY, OUTPUT);
-  pinMode(PIN_MODEM_POWER, OUTPUT);
+  digitalWrite(PIN_MODEM_RST, HIGH);  // active low — hold out of reset
 
-  digitalWrite(PIN_MODEM_RST, HIGH);
-  digitalWrite(PIN_MODEM_PWRKEY, LOW);
-  digitalWrite(PIN_MODEM_POWER, LOW);
+  // PIN_MODEM_EN is already claimed output-low at the very top of setup()
+  // (main.cpp) — the module has no PWRKEY, power control is the rail itself.
+  pinMode(PIN_MODEM_EN, OUTPUT);
 }
 
 bool ensureNetwork(unsigned long timeoutMs) {
@@ -222,10 +212,6 @@ void modemManagerBeginHardware() {
     return;
   }
 
-  if (!ip5306EnsureBoostKeepOn()) {
-    Serial.println(F("WARN IP5306 boost keep-on failed"));
-  }
-
   configureModemPins();
   hardwareReady = true;
 }
@@ -233,14 +219,29 @@ void modemManagerBeginHardware() {
 bool modemManagerPowerOn() {
   modemManagerBeginHardware();
 
-  digitalWrite(PIN_MODEM_POWER, HIGH);
-  pulseModemPowerKey();
+  // Rail up: EN high enables CR-SJ5530 #2, the SIM800L auto-boots (no
+  // PWRKEY on this module — spec.md §10).
+  digitalWrite(PIN_MODEM_EN, HIGH);
+  delay(MODEM_EN_SETTLE_MS);
 
   SerialAT.begin(115200, SERIAL_8N1, PIN_MODEM_RX, PIN_MODEM_TX);
-  delay(1500);
 
-  status.powered = true;
+  // Wait for the module to boot and answer AT (also syncs its autobaud).
+  const unsigned long deadline = millis() + MODEM_BOOT_TIMEOUT_MS;
+  bool answered = false;
+  while (static_cast<long>(millis() - deadline) < 0) {
+    if (modem.testAT(1000)) {
+      answered = true;
+      break;
+    }
+  }
+
+  status.powered = true;  // the rail is up either way
   status.initialized = false;
+  if (!answered) {
+    Serial.println(F("ERR modem not answering AT after rail-up — check EN wiring/rail"));
+    return false;
+  }
   Serial.println(F("Modem power on"));
   return true;
 }
@@ -251,12 +252,16 @@ bool modemManagerPowerOff() {
   }
 
   if (status.initialized) {
+    // Clean network detach first (AT+CPOWD=1 via TinyGSM — the only soft
+    // path on a board with no PWRKEY), then cut the rail regardless: the
+    // post-CPOWD state is unspecified, only EN low guarantees power-off.
     modem.poweroff();
+    delay(MODEM_CPOWD_DETACH_MS);
     status.initialized = false;
   }
 
   SerialAT.end();
-  digitalWrite(PIN_MODEM_POWER, LOW);
+  digitalWrite(PIN_MODEM_EN, LOW);
   status.powered = false;
   status.networkRegistered = false;
   status.gprsConnected = false;
@@ -425,11 +430,15 @@ bool modemManagerSyncClock() {
     return false;
   }
 
-  // Skip if the RTC already holds a plausible date (later than 2023-01-01).
-  if (time(nullptr) > 1672531200) {
-    return true;
-  }
-
+  // Deliberately re-syncs every call, not just once: the ESP32's own system
+  // clock free-runs on its internal (uncalibrated) RTC oscillator through
+  // each multi-hour deep sleep, and rtcClockSyncFromSystemTimeIfNeeded()
+  // trusts this clock as the DS3231's source of truth every cycle. An
+  // earlier "skip if already plausible" check here meant only the very
+  // first sync was ever real — every cycle after that pushed an increasingly
+  // stale, uncorrected clock into the DS3231, observed in the field
+  // 2026-07-23 as a steady ~35s/cycle drift (fixed). NITZ is normally free
+  // (cached from network registration), so this doesn't add real cost.
   int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
   float tzHours = 0.0f;
   bool got = modem.getNetworkTime(&year, &month, &day, &hour, &minute, &second,

@@ -2,12 +2,16 @@
 
 End-to-end guide: install the hive scale, calibrate weight, connect MQTT, and view everything in Home Assistant under **one device per hive**.
 
+Discrete build: **ESP32-WROOM-32** + standalone SIM800L + **4 corner load cells** behind a PCA9548A I2C mux —
+see [spec.md](../spec.md) for the full architecture. For the retired single-cell TTGO T-Call design, see the
+`tcall-v1` git tag.
+
 **Related docs**
 
 | Topic | Document |
 |-------|----------|
 | Build, flash, bench commands | [`local-setup.md`](local-setup.md) |
-| T-Call pinout and wiring diagrams | [`esp32_sim800l.md`](esp32_sim800l.md) |
+| SIM800L wiring and bring-up | [`esp32_sim800l.md`](esp32_sim800l.md) |
 | Mosquitto TLS, certificates, port forward | [`mqtt-tls-setup.md`](mqtt-tls-setup.md) |
 | Home Assistant MQTT entities (YAML) | [`home-assistant/mqtt_sensors.yaml`](home-assistant/mqtt_sensors.yaml) |
 
@@ -15,15 +19,15 @@ End-to-end guide: install the hive scale, calibrate weight, connect MQTT, and vi
 
 ## 1. What you get
 
-Each hive has a battery-powered TTGO T-Call scale that:
+Each hive has a battery-powered scale that:
 
-1. Wakes on a timer (default every **6 hours**, configurable).
-2. Measures weight and battery.
+1. Wakes on a wall-clock-aligned schedule (default every **6 hours**, configurable).
+2. Measures weight at all **4 corners** and sums them, plus scale temperature and battery.
 3. Connects over **WiFi** (at home) or **2G GPRS** (in the field).
 4. Publishes JSON to your Mosquitto broker.
 5. Goes back to **deep sleep** until the next cycle.
 
-Home Assistant shows weight, battery, connectivity, and cell tower info on a single device card — no custom integration required.
+Home Assistant shows total weight, per-corner weight, battery, connectivity, and cell tower info on a single device card — no custom integration required.
 
 ---
 
@@ -31,22 +35,28 @@ Home Assistant shows weight, battery, connectivity, and cell tower info on a sin
 
 | Item | Notes |
 |------|-------|
-| TTGO T-Call V1.3 | ESP32 + SIM800L + IP5306 PMIC |
-| YZC-1B 200 kg load cell + NAU7802 | I2C ADC, wired per [`local-setup.md`](local-setup.md) |
+| ESP32-WROOM-32 devkit | Plain WROOM, no PSRAM needed |
+| Standalone SIM800L module | 4.2 V supply (via CR-SJ5530 #2), own UART/RST wiring — no `PWRKEY` pin, see [`esp32_sim800l.md`](esp32_sim800l.md) |
+| 4× 40 kg load cell + NAU7802 | One NAU7802 per corner, all I2C 0x2A, fanned out over a PCA9548A mux — wired per [`local-setup.md`](local-setup.md) |
+| PCA9548A I2C mux | 0x70, corners on mux channels 0, 1, 2, 7 |
+| DS3231 precision RTC | 0x68, drives the wall-clock-aligned wake schedule; fit a CR2032 |
 | DS18B20 temperature sensor | On the scale frame, GPIO 25 + 4.7 kΩ pull-up |
-| Li-Ion battery | 18650 or pack, 3000–6000 mAh |
+| TP4056 + 2× CR-SJ5530 | Power chain — **a battery must always be connected**, the TP4056 alone can't run the board |
+| Li-Ion battery | 3000–6000 mAh recommended, real discharge rating |
 | 2G nano SIM | Data plan (Kyivstar default APN `internet`) |
 | GSM antenna | Outside the enclosure |
 | Setup button | NO push button: GPIO 13 ↔ GND |
 | IP65 enclosure | Outdoor mounting |
 
-![Wiring diagram](tcall_nau7802_wiring.svg)
+![Wiring diagram](smart-apiary-scale-schematic.svg)
 
-![TTGO T-Call V1.3 pinout](T-Call.jpg)
+Full wiring tables, GPIO map, and BOM: [`local-setup.md` — Wiring](local-setup.md#wiring) and
+[spec.md §5/§10](../spec.md#10-hardware-connections).
 
-Full wiring tables and pin notes: [`local-setup.md` — Wiring](local-setup.md#wiring).
-
-Mount the load cell in **compression** between a fixed base and a top plate under the hive. Constrain lateral movement so the cell only sees vertical load.
+Mount all 4 load cells in **compression**, one under each corner of a rigid frame beneath the hive. The frame
+must constrain lateral movement at each corner and distribute load onto the cells without twisting/binding.
+Label corners consistently at mounting time — firmware addresses them by index (0-3), mapped internally to mux
+channels 0, 1, 2, 7.
 
 ---
 
@@ -56,31 +66,37 @@ Calibration is stored in flash and survives power loss. Do this once per hive (r
 
 ### Option A — Web config portal (recommended)
 
-1. Power the hive. If it is on home WiFi, open `http://<wifi_ip>` (see serial log `wifi_ip=...`).
+1. Power the hive (battery connected). If it is on home WiFi, open `http://<wifi_ip>` (see serial log `wifi_ip=...`).
 2. If there is no WiFi, hold the **setup button 10 seconds** → connect phone to AP `beekpr-hive-01` (password `beekpr-setup`) → open `http://192.168.4.1`.
 3. In **Weight calibration**:
-   - Empty platform, keep still → **Tare (empty scale)**.
-   - Place a **known weight** (e.g. 8 kg) → enter kg → **Calibrate**.
-4. Live reading should match the known weight within ~0.1–0.5 kg.
+   - Empty platform, keep still → **Tare all corners**.
+   - Place a **known weight** (e.g. 8 kg) roughly centered → enter kg → **Calibrate**.
+4. Live per-corner reading and the summed total should match expectations within ~0.01–0.1 kg.
 5. **Save settings and reboot** if you changed other settings too.
 
 ### Option B — USB serial (bench)
 
-Connect USB, open serial monitor **115200 baud**:
+Connect USB (with battery attached), open serial monitor **115200 baud**:
 
 ```
-tare          # empty platform, wait for OK
-cal 8         # replace 8 with your known weight in kg
-show          # verify offset and scale
+tare          # empty platform, wait for OK — all 4 corners zeroed in one pass
+cal 8         # replace 8 with your known weight in kg, roughly centered
+show          # verify per-corner offsets and shared span
 ```
+
+**How calibration works:** each corner keeps its **own tare offset** (mounting stress differs per corner even
+on a rigid frame). `cal <kg>` sums all 4 (now-tared) corners' raw readings and derives **one shared span
+factor** from that sum, applied uniformly to all 4. This only assumes the *sum* of the 4 corners tracks weight
+linearly — it doesn't require the frame to distribute load exactly 1/4 to each corner, or the 4 cells to be
+perfectly matched.
 
 **Tips**
 
-- Tare and calibrate each take ~2.5 s (median of 20 samples). Keep the platform still; unstable readings fail on purpose.
+- Tare and calibrate each take ~2.5 s per corner (median of 20 samples). Keep the platform still; unstable readings fail on purpose.
 - On a **scheduled wake**, the device waits **2 minutes** after boot before measuring (thermal settling). Bench mode or a prior long awake session skips this.
 - `stable_kg` in telemetry is a median of recent samples — use it for graphs and alerts.
 - Slow drift over hours (±50 g) is normal load-cell creep and temperature — track trends, not absolute grams. Use `temp_scale_c` (DS18B20 on the frame) to correlate drift with temperature.
-- NAU7802: **3.3 V** supply, SDA on **GPIO 19**, SCL on **GPIO 18** (I2C address 0x2A).
+- **Watch the per-corner fields** (`corner1_kg`..`corner4_kg`) over time — a corner drifting away from the other 3 is the first sign of a loose mount, damaged cell, or a corner that needs re-taring, and it shows up there before it skews the total.
 - This is for **hive monitoring**, not certified trade weighing.
 
 ---
@@ -122,9 +138,9 @@ Portal sections: calibration, WiFi, GSM/APN, operating mode, MQTT broker, firmwa
 
 ### Normal operation (power)
 
-- **GSM:** modem and WiFi off between reports; wakes for warm-up → measure → publish → sleep.
+- **GSM:** modem and WiFi off between reports; wakes for warm-up → measure → publish → sleep. The modem's power rail is fully cut between reports (not just idled) — see [`esp32_sim800l.md`](esp32_sim800l.md).
 - **WiFi:** STA may stay up at home during bench mode; scheduled cycles still deep-sleep the ESP32.
-- **Scheduled publish:** **2-minute sensor warm-up** after cold boot before the weight is read (skipped if already awake ≥2 min).
+- **Scheduled publish:** **2-minute sensor warm-up** after cold boot before weight is read (skipped if already awake ≥2 min).
 - **Setup button short press** after deep sleep wakes the device for a **5-minute bench window** (serial + portal). Serial commands extend the window.
 - Serial `sleep` forces deep sleep immediately; `send` runs one publish cycle now.
 
@@ -142,7 +158,7 @@ Publish cycle starts in 5s — press setup button or hit Enter for bench mode
 
 ### Report interval
 
-Default **6 hours** (4× per day). Change in portal **Report interval** or serial:
+Default **6 hours** (4× per day), wall-clock aligned via the DS3231 (e.g. a 1 h interval always fires at `:00`). Change in portal **Report interval** or serial:
 
 ```
 setint 360    # minutes (1..1440)
@@ -171,6 +187,10 @@ Example `device_id`: `hive-01` → topics `beekpr/hive-01/state` and `beekpr/hiv
   "report_time": "2026-07-15T13:33:25Z",
   "weight_kg": 47.32,
   "stable_kg": 47.29,
+  "corner1_kg": 11.90,
+  "corner2_kg": 11.75,
+  "corner3_kg": 11.88,
+  "corner4_kg": 11.79,
   "temp_scale_c": 18.75,
   "battery_v": 3.87,
   "battery_pct": 78,
@@ -190,8 +210,9 @@ Example `device_id`: `hive-01` → topics `beekpr/hive-01/state` and `beekpr/hiv
 | Field | Meaning |
 |-------|---------|
 | `report_time` | ISO8601 UTC timestamp from the DS3231 (or ESP32 system clock if no DS3231 fitted); `null` until a clock has synced at least once — GSM mode syncs it automatically via NITZ/NTP, WiFi mode has no clock source yet |
-| `weight_kg` | Instant weight |
+| `weight_kg` | Instant weight — sum of all 4 corners |
 | `stable_kg` | Median-filtered weight (best for graphs) |
+| `corner1_kg`..`corner4_kg` | Each corner's own tared, calibrated weight — diagnostic; a failing/miscalibrated corner shows up here before it skews the total. `null` for a corner that failed to read or before calibration |
 | `temp_scale_c` | Scale-frame temperature from DS18B20 (`null` if sensor missing) |
 | `battery_v` / `battery_pct` | Battery status |
 | `rssi` | GSM signal 0–31 (`-1` when not on GSM) |
@@ -236,7 +257,7 @@ Trigger a publish from the hive (serial `send` or `mqtt`, or wait for the schedu
 You should see:
 
 ```
-beekpr/hive-01/state {"device_id":"hive-01","weight_kg":...}
+beekpr/hive-01/state {"device_id":"hive-01","weight_kg":...,"corner1_kg":...}
 beekpr/hive-01/availability online
 ```
 
@@ -279,8 +300,9 @@ After the hive publishes once:
 
 | Entity | Type | Use |
 |--------|------|-----|
-| Hive 01 Weight | sensor (kg) | Live weight |
+| Hive 01 Weight | sensor (kg) | Live weight (sum of 4 corners) |
 | Hive 01 Weight (stable) | sensor (kg) | Graphs & automations |
+| Hive 01 Corner 1-4 weight | sensor (kg) | Diagnostic — spot a failing/drifting corner before it skews the total |
 | Hive 01 Battery | sensor (%) | Charge level |
 | Hive 01 Battery voltage | sensor (V) | Diagnostics |
 | Hive 01 GSM signal | sensor | Field signal quality |
@@ -310,7 +332,8 @@ entities:
 show_header_toggle: false
 ```
 
-Or a weight history chart: **History graph** card on `sensor.hive_01_weight_stable`.
+Or a weight history chart: **History graph** card on `sensor.hive_01_weight_stable`. A **per-corner** entities
+card (`sensor.hive_01_corner1_weight` .. `corner4`) is useful for spotting an outlier corner at a glance.
 
 ### Step 5 — Optional automations
 
@@ -319,6 +342,7 @@ Examples (commented) in [`home-assistant/automations.yaml`](home-assistant/autom
 - Low battery (`sensor.hive_01_battery` below 20%)
 - Hive offline (`binary_sensor.hive_01_online` off for 5 minutes)
 - Rapid weight drop (template — tune threshold for your hive)
+- One corner diverging from the other 3 beyond a threshold (possible sensor fault or uneven loading)
 
 Create via **Settings → Automations** or paste into `automations.yaml`.
 
@@ -340,10 +364,19 @@ Create via **Settings → Automations** or paste into `automations.yaml`.
 3. Device wakes, connects GPRS, publishes, sleeps — no interaction needed.
 4. Check HA for weight trend and `binary_sensor.hive_01_online`.
 
+### First deployment on a new hive — burn-in
+
+Before trusting a newly-built unit unattended in the field:
+
+1. Run the full bring-up checklist in [`local-setup.md`](local-setup.md): power chain, I2C mux (`i2cscan`),
+   battery divider calibration, modem (`modem` → `gprs` → `mqttls` → `mqtt`), sleep-current audit.
+2. Complete weight calibration (§3 above) with the frame fully mounted and loaded as it will be in the field.
+3. Battery-only burn-in: `sleep`, **disconnect USB entirely**, and watch `mosquitto_sub -t 'beekpr/{device_id}/#' -v` from another machine for `state` messages arriving on schedule. Don't trust the serial monitor for this — reconnecting it resets the board via the USB-serial chip's auto-program circuit, which looks identical to a real scheduled wake.
+
 ### USB maintenance (apiary visit)
 
 1. **GSM field mode:** cold boot publishes once and sleeps. To get an interactive session instead, use the **5-second escape window** at boot (press setup button or hit Enter), or press the setup button after the device is asleep.
-2. Serial monitor 115200 — live `weight_kg` / `mqtt_payload` lines.
+2. Serial monitor 115200 — live per-corner weight / `mqtt_payload` lines.
 3. Commands: `show`, `send`, `portal`, `setint`, `reboot`, `sleep`.
 4. After **5 minutes** without serial input, device publishes once and sleeps (unless AP portal is open).
 
@@ -360,22 +393,20 @@ Create via **Settings → Automations** or paste into `automations.yaml`.
 
 | Symptom | Check |
 |---------|--------|
-| `raw=not_ready` | NAU7802 wiring, 3.3 V supply, SDA=19 SCL=18; check boot log for `ERR NAU7802 not found` |
+| `ERR NAU7802 corner N not found` | That corner's wiring, or the mux channel it's on (`CORNER_MUX_CHANNEL`); run `i2cscan` — corner still degrades to a flagged outlier, not a dead device |
+| One corner's raw reading ramps continuously / never settles | Floating or broken bridge input on that corner — check E+/E−/A+/A− wiring on that load cell |
 | `temp_scale_c=unavailable` | DS18B20 wiring (DQ=25) or missing 4.7 kΩ pull-up |
-| Weight drifts / wrong sign | Re-tare; swap A+/A− if inverted; expect ±50 g/h thermal creep on bench |
-| Weight jumps after sleep | Fixed in firmware (ADC warm-up + 2 min thermal delay before publish) |
+| Weight drifts / wrong sign | Re-tare; swap A+/A− on that corner if inverted; expect ±50 g/h thermal creep on bench |
+| Weight jumps after sleep | Expected — 2 min thermal warm-up before a scheduled publish measures; bench mode skips it if already awake that long |
 | No MQTT in HA | `mosquitto_sub` on broker; hive `send` or `mqtt` command |
-| GSM connect OK, no data in HA | Fixed in firmware — ensure latest build (modem TX drain) |
 | TLS fails on `mqtt` | `certs/ca.pem`, SAN = public IP, 8883 open, correct password |
 | Portal won't open on WiFi | Hold button 10 s for **AP mode**; or `portal` on serial |
 | HA entities missing | Package installed, HA restarted, topic `beekpr/hive-01/state` received |
-| Device “offline” too soon | Lower `expire_after` in YAML or increase `setint` |
-| Brownout on AP connect | Power from charged battery; IP5306 boost enabled in firmware |
-| Board dies on battery overnight (all LEDs dark until power button) | IP5306 light-load cutoff on a PMIC whose keep-on bit doesn't verify. Firmware checks `boost_keep_on` (honest read-back, not just a successful I2C ack) before every sleep and only falls back to 25 s keepalive chunks when it's false — a verified-good PMIC sleeps the full interval normally. Check the `boost_keep_on` field in the MQTT payload: if it's `false`, that's your PMIC, not the firmware; if the board still dies while it reads `true`, the chunk-wake path itself may be failing — check `wake_cause=timer` is logged every ~25 s on serial over USB with the battery also connected |
-| Setup button does nothing when dark | Power rail is off (PMIC), not deep sleep — press IP5306 power button |
-| `ERR IP5306: I2C write failed err=5` or `keep-on bit did not stick` | PMIC not answering, or answering but not honoring the register (seen on one T-Call V1.3 unit; a replacement V1.4 board tested clean — may be batch/clone-specific rather than universal). Not fatal by itself — firmware automatically switches to chunked sleep whenever this is true, no reflash needed — but confirm with the battery-only MQTT test below rather than trusting the serial reading alone |
-| Board sleeps on battery and never auto-wakes (RTC timer), but a manual **EN button press wakes it fine** and it publishes correctly | Was traced (2026-07 debugging session) to a genuinely faulty PMIC on one V1.3 unit — `i2cscan` found **zero devices** on the whole PMIC bus (not just the wrong address), and the chip never showed up over I2C in any state. Confirmed via multimeter that `3V3`/`5V` header pins sagged specifically on battery-only power. Resolved by replacing the board (a V1.4 unit tested clean) rather than a firmware fix — if you hit this, suspect the PMIC hardware itself before spending more time in firmware |
-| Verifying battery survival at all | Don't trust the serial monitor for this — reconnecting it resets the board via the CP2102 auto-program circuit, which looks identical to a real wake. Use MQTT instead: set a short `tx_interval_sec`, `sleep`, disconnect USB entirely, and watch `mosquitto_sub -t 'beekpr/{device_id}/#' -v` from another machine for `state` messages arriving on schedule with USB still unplugged |
+| Device "offline" too soon | Lower `expire_after` in YAML or increase `setint` |
+| Board dies/resets, especially under modem load | Check a battery is connected to the TP4056 — it can't source the modem's boot-current bursts alone, see [`local-setup.md`](local-setup.md#prerequisites) |
+| Modem never registers, SIM800L LED never blinks | Rail/supply problem — see [`esp32_sim800l.md`](esp32_sim800l.md) bring-up checklist |
+| Deep-sleep current in the mA range instead of µA | Almost always an un-removed indicator LED on the ESP32 devkit, a NAU7802 board, or the DS3231 module — see [`local-setup.md`](local-setup.md#sleep-current-audit) |
+| Verifying battery survival at all | Don't trust the serial monitor for this — reconnecting it resets the board. Use MQTT: `sleep`, disconnect USB entirely, watch `mosquitto_sub` from another machine for on-schedule reports |
 | Stuck retrying a wrong broker (GSM) | Reset/reflash, then use the **5 s escape window** (button or Enter) → bench mode → fix host via `portal` |
 
 ---
@@ -387,7 +418,7 @@ Create via **Settings → Automations** or paste into `automations.yaml`.
 ```
 tare | cal <kg> | show | reset | setint <min> | setcell <mcc> <mnc> <lac> <cid>
 setmode gsm|wifi | setwificred <ssid> <pass> | wificonn
-modem | gprs | mqttls | mqtt | send | sleep | modemoff | portal | reboot
+modem | gprs | mqttls | mqtt | send | sleep | modemoff | battery | i2cscan | portal | reboot
 ```
 
 ### Files in this repo
@@ -398,6 +429,7 @@ modem | gprs | mqttls | mqtt | send | sleep | modemoff | portal | reboot
 | `doc/home-assistant/mqtt_sensors.yaml` | HA entities → one device |
 | `doc/mqtt-tls-setup.md` | Certificates & Mosquitto TLS |
 | `doc/local-setup.md` | Developer build & bench test |
+| `doc/esp32_sim800l.md` | SIM800L wiring, power control, bring-up |
 | `.env.example` | Firmware secrets template |
 
 ### Multi-hive

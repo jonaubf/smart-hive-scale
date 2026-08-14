@@ -13,7 +13,6 @@
 #include "connectivity_mode.h"
 #include "device_settings.h"
 #include "gsm_settings.h"
-#include "ip5306.h"
 #include "modem_manager.h"
 #include "mqtt_settings.h"
 #include "rtc_clock.h"
@@ -182,6 +181,10 @@ bool ensureNetwork(unsigned long networkTimeoutMs) {
       wifiManagerShow();
       return false;
     }
+    // WiFi mode's clock source (SNTP), mirroring modemManagerEnsureGprs()'s
+    // NITZ/NTP sync in GSM mode. Non-fatal: a publish without a fresh sync
+    // is still a publish.
+    wifiManagerSyncClock();
     return true;
   }
 
@@ -213,10 +216,10 @@ void drainModemTxBeforeClose() {
   }
 }
 
-// Weight/temp/battery/clock snapshot, captured before any modem/WiFi
-// activity. GSM registration, GPRS attach, and the TLS handshake all draw
-// current spikes (SIM800 TX bursts up to ~2A) on the same shared supply the
-// NAU7802's bridge excitation runs from — sampling mid-conversion, or
+// Weight (all 4 corners)/temp/battery/clock snapshot, captured before any
+// modem/WiFi activity. GSM registration, GPRS attach, and the TLS handshake
+// all draw current spikes (SIM800 TX bursts up to ~2A) on the same shared
+// supply the NAU7802s' bridge excitation runs from — sampling mid-conversion, or
 // mid-I2C-transaction for the DS3231 read, during one of those spikes can
 // corrupt a reading (confirmed in the field 2026-07-17: a garbled
 // report_time with an out-of-range month/day/minute, read while the modem
@@ -226,26 +229,26 @@ void drainModemTxBeforeClose() {
 struct SensorSnapshot {
   float weightKg = 0.0f;
   float stableKg = 0.0f;
+  float cornersKg[NUM_CORNERS];
   float tempScaleC = NAN;
   float batteryV = 0.0f;
   int batteryPct = 0;
-  bool boostKeepOn = false;
   String reportTimeIso8601;
 };
 
 SensorSnapshot captureSensorSnapshot() {
   SensorSnapshot snap;
-  const WeightSensorReading reading = weightSensorReadRaw(SCALE_RAW_SAMPLES);
+  const ScaleReading reading = calibrationReadAll(SCALE_RAW_SAMPLES);
+  for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
+    snap.cornersKg[corner] = reading.cornerKg[corner];
+  }
   if (reading.ok && calibrationIsReady()) {
-    snap.weightKg = calibrationWeightKg(reading.raw);
+    snap.weightKg = reading.totalKg;
     snap.stableKg = snap.weightKg;
   }
   snap.tempScaleC = tempSensorReadC();
   snap.batteryV = batterySensorVoltage();
   snap.batteryPct = batterySensorPercent();
-  // Refresh keep-on and report the verified read-back — catches Wire/PMIC
-  // failures before the next deep sleep on battery.
-  snap.boostKeepOn = ip5306EnsureBoostKeepOn();
   snap.reportTimeIso8601 = rtcClockNowIso8601();
   return snap;
 }
@@ -258,8 +261,8 @@ String buildTelemetryJsonFromSnapshot(const SensorSnapshot &snap) {
   const CellTowerInfo cell = modem.cell.mcc > 0 ? modem.cell : gsmSettingsCellTower();
   const WifiLinkInfo wifi = wifiManagerStatus();
 
-  return buildTelemetryJson(DEVICE_ID, snap.weightKg, snap.stableKg, snap.tempScaleC,
-                            snap.batteryV, snap.batteryPct, snap.boostKeepOn, modem.rssi,
+  return buildTelemetryJson(DEVICE_ID, snap.weightKg, snap.stableKg, snap.cornersKg,
+                            snap.tempScaleC, snap.batteryV, snap.batteryPct, modem.rssi,
                             cell, wifi, settingsTxIntervalSec(), snap.reportTimeIso8601);
 }
 

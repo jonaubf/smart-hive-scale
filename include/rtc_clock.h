@@ -3,13 +3,14 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-// DS3231 precision RTC on the shared IP5306 I2C bus (GPIO 21/22), address
-// 0x68. Drives the report schedule via its alarm output (PIN_RTC_ALARM,
-// ext1 deep-sleep wake) so reports land on precise wall-clock time instead
-// of drifting on the ESP32's internal RC-oscillator timer.
+// DS3231 precision RTC on the shared I2C bus (PIN_I2C_SDA/SCL), address
+// 0x68, upstream of the PCA9548A mux. Drives the report schedule via its
+// alarm output (PIN_RTC_ALARM, ext1 deep-sleep wake) so reports land on
+// precise wall-clock time instead of drifting on the ESP32's internal
+// RC-oscillator timer.
 
-// Idempotent. Requires Wire already begun on the IP5306 pins — call after
-// ip5306EnsureBoostKeepOn().
+// Idempotent. Requires Wire already begun on the shared bus pins (done in
+// main.cpp setup()).
 void rtcClockBegin();
 bool rtcClockIsPresent();
 
