@@ -94,6 +94,30 @@ link) are read separately, after connecting, since those only exist once actuall
 Before every deep sleep: all 4 NAU7802 corners → register power-down, WiFi fully stopped, modem powered off
 (rail cut, GPIO hold armed), DS3231 report alarm reprogrammed (below).
 
+### Closing an MQTT session over GSM (don't "simplify" `mqttDisconnect()`)
+
+The SIM800 buffers TX data, and TinyGSM's socket close is `AT+CIPCLOSE=<mux>,1` — a **quick close that
+discards anything the radio hasn't put on the air yet**. Anything written immediately before a close can
+therefore vanish, which on a 2G uplink is routine rather than an edge case. Two places in `mqtt_client.cpp`
+exist purely because of this, and both look like dead weight if you don't know why:
+
+- `drainModemTx(MODEM_TX_DRAIN_PAYLOAD_MS)` after the publishes — without it the telemetry itself is what
+  gets discarded.
+- `mqttDisconnect()` **deliberately does not call `PubSubClient::disconnect()`**. That method writes the
+  DISCONNECT packet and calls `stop()` in the same breath, so the packet dies in the quick close. It writes
+  the 2-byte DISCONNECT itself, drains (`MODEM_TX_DRAIN_DISCONNECT_MS`), and only then closes.
+
+Symptom when the second one regresses: Mosquitto logs `disconnected: exceeded timeout` roughly
+`keepalive × 1.5` after the *last packet it received*, on cycles where every publish actually landed — the
+broker is just sitting on a half-open socket waiting out its grace period. Confirmed in the field
+2026-08-15: `report_time`/HA `last_changed` showed the state publish arriving ~1s after CONNACK, then
+nothing for 90s. A healthy cycle now logs a bare `disconnected.` (broker received a real DISCONNECT) within
+a few seconds. Note this is a *cosmetic* failure mode — no telemetry is lost either way — so don't chase it
+as data loss, but don't reintroduce it either: the noise buries genuine failures in the log.
+
+Raising `MQTT_KEEPALIVE_SEC` does **not** fix this (it only moves when the broker gives up); it's set to 60
+for genuine publish headroom on a slow link, nothing more.
+
 ### RTC-driven scheduling (`rtc_clock`)
 
 A DS3231 (I2C 0x68, upstream of the PCA9548A mux on the same shared bus GPIO 21/22) drives the report schedule

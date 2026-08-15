@@ -692,7 +692,7 @@ the detailed, phase-by-phase firmware and bring-up record lives in
 | 12 | Discrete power chain bring-up | TP4056 + 2× CR-SJ5530 verified standalone (`EN`-pin switching, PS-pad standby current); ESP32 boots and holds both rails under load; per-board battery-divider calibration — **done** |
 | 13 | I2C mux bring-up | PCA9548A channel switching verified; all 4 NAU7802 respond on channels 0/1/2/7 (`CORNER_MUX_CHANNEL`), DS3231 responds upstream — **done** |
 | 14 | 4-corner calibration flow | Per-corner tare + shared-span calibration implemented, portal/serial UI updated — **firmware done**; per-unit tare/cal execution is a deployment-time step, see [`doc/user-guide.md`](doc/user-guide.md) §3 |
-| 15 | Standalone SIM800L bring-up | Modem power-on/registration verified on the discrete wiring; before first field deployment, also verify GPRS attach + TLS MQTT publish end-to-end with `gprs` → `mqttls` → `mqtt` → `send` (see [`doc/local-setup.md`](doc/local-setup.md)) |
+| 15 | Standalone SIM800L bring-up | Modem power-on/registration verified on the discrete wiring; full GSM → GPRS → TLS → MQTT chain since verified in the field (authenticated TLS 1.2 publish + clean disconnect, ~6 s per cycle) — **done** |
 | 16 | Field re-deployment | Install on the hive stand, verify 4-corner mounting, run a battery-only burn-in watching MQTT for on-schedule reports — see [`doc/user-guide.md`](doc/user-guide.md) §7 |
 
 ### Step 9 deliverable (Mosquitto + network)

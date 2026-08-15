@@ -175,12 +175,16 @@ unit. One corner initially showed a continuously-ramping/wrapping raw reading (f
 input) — traced to a load-cell wiring fault on that corner, not a firmware or mux issue; resolved
 by fixing the E+/E−/A+/A− connection.
 
-**E4. SIM800L bring-up — modem power-on/registration verified (2026-08-08); full chain pending.**
-`modem` succeeded end-to-end on the discrete wiring (`EN` rail-up → `AT` sync → SIM ready →
-network registered on Kyivstar, rssi=12, real cell tower IDs). Confirms the EN-based power
-control, UART divider, and bulk cap are all correctly wired. **Before first field deployment,
-still run** `gprs` → `mqttls` → `mqtt` → `send` to verify GPRS attach and TLS MQTT publish
-end-to-end — not yet exercised with a confirmed successful output on this unit.
+**E4. SIM800L bring-up — done (2026-08-08 modem, 2026-08-15 full chain).**
+`modem` succeeded on the discrete wiring (`EN` rail-up → `AT` sync → SIM ready → registered on
+Kyivstar, rssi=12, real cell tower IDs), confirming EN-based power control, the UART divider, and
+the bulk cap. Full GSM→TLS→MQTT chain since verified in the field from the broker side: repeated
+scheduled cycles show TCP+TLS+auth in ~2s (`TLSv1.2 ECDHE-RSA-AES256-GCM-SHA384`, `hive-01`
+authenticated), telemetry landing in HA ~1s later, and a clean close — full session ~6s.
+Two MQTT-layer defects were found and fixed only once running on a real 2G link, both invisible
+on the bench: PubSubClient's 15s default keepalive (too thin for a slow uplink) and the MQTT
+DISCONNECT being destroyed by TinyGSM's quick close — see CLAUDE.md "Closing an MQTT session over
+GSM" for the mechanism, and do not undo those two.
 **Real-world gotcha found during bring-up: the TP4056 cannot power the board on its own.**
 Running on USB/TP4056 with no battery attached caused the whole supply to oscillate ~3.1–4.2 V
 and reset the board the moment the modem attempted its boot-current burst (LED never lit, looked
