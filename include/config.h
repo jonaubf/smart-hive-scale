@@ -82,6 +82,18 @@
 #define MODEM_MQTT_CONNECT_TIMEOUT_MS 120000UL
 #endif
 
+// PubSubClient defaults to a 15s keepalive — too short for GSM: the broker
+// disconnects with "exceeded timeout" at keepalive*1.5 (~23s) measured from
+// the CONNECT packet, and a slow/marginal 2G uplink can easily take longer
+// than that to actually transmit the state+availability publishes after a
+// fast TLS handshake+CONNACK (observed in the field: Mosquitto logs show
+// "New client connected as hive-01" within ~2-3s, then "exceeded timeout"
+// ~23s later, on most cycles — the publish itself was the bottleneck, not
+// the connect). 60s matches what other MQTT clients on this broker already
+// use and gives a 90s grace window, consistent with this project's already-
+// generous GSM connect timeouts above.
+constexpr uint16_t MQTT_KEEPALIVE_SEC = 60;
+
 // Battery ADC. Vbat is nominally divided 2:1 (100k/100k) before the ADC
 // input, but the naive raw-to-voltage conversion below doesn't use ESP32's
 // factory ADC calibration, and real divider resistors have their own
