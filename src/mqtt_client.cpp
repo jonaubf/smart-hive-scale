@@ -274,6 +274,9 @@ bool mqttConnect(unsigned long timeoutMs) {
 
   mqttClient.setServer(brokerHost, brokerPort);
   mqttClient.setBufferSize(kMqttBufferSize);
+  // Library default (15s) is too short for a slow/marginal GSM publish —
+  // see config.h MQTT_KEEPALIVE_SEC.
+  mqttClient.setKeepAlive(MQTT_KEEPALIVE_SEC);
 
   stopTransport();
 
