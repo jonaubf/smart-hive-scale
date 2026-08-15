@@ -82,17 +82,23 @@
 #define MODEM_MQTT_CONNECT_TIMEOUT_MS 120000UL
 #endif
 
-// PubSubClient defaults to a 15s keepalive — too short for GSM: the broker
-// disconnects with "exceeded timeout" at keepalive*1.5 (~23s) measured from
-// the CONNECT packet, and a slow/marginal 2G uplink can easily take longer
-// than that to actually transmit the state+availability publishes after a
-// fast TLS handshake+CONNACK (observed in the field: Mosquitto logs show
-// "New client connected as hive-01" within ~2-3s, then "exceeded timeout"
-// ~23s later, on most cycles — the publish itself was the bottleneck, not
-// the connect). 60s matches what other MQTT clients on this broker already
-// use and gives a 90s grace window, consistent with this project's already-
-// generous GSM connect timeouts above.
+// PubSubClient's 15s default leaves only keepalive*1.5 = ~23s of broker
+// grace, measured from the last packet Mosquitto actually received. That is
+// thin for a 2G uplink where a publish can stall on a bad moment; 60s (90s
+// grace) matches what other clients on this broker already negotiate. Note
+// this does NOT by itself stop "exceeded timeout" lines in mosquitto.log —
+// those come from a lost DISCONNECT packet, see MODEM_TX_DRAIN_DISCONNECT_MS.
 constexpr uint16_t MQTT_KEEPALIVE_SEC = 60;
+
+// The SIM800 buffers TX data, and TinyGSM closes its socket with
+// AT+CIPCLOSE=<mux>,1 — a *quick* close that discards anything the radio
+// has not yet put on the air. Pump the modem before letting a close happen,
+// or the tail of a session never leaves the device (2G uplinks are slow
+// enough for this to be routine, not an edge case).
+constexpr unsigned long MODEM_TX_DRAIN_PAYLOAD_MS = 3000UL;
+// Same hazard for the 2-byte MQTT DISCONNECT (a ~30-byte TLS record) — far
+// smaller than a telemetry payload, so it needs much less flush time.
+constexpr unsigned long MODEM_TX_DRAIN_DISCONNECT_MS = 1000UL;
 
 // Battery ADC. Vbat is nominally divided 2:1 (100k/100k) before the ADC
 // input, but the naive raw-to-voltage conversion below doesn't use ESP32's

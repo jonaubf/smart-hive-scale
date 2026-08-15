@@ -203,14 +203,15 @@ void teardownNetwork() {
   modemManagerGprsDisconnect();
 }
 
-// The SIM800 buffers TX data; dropping the socket/GPRS right after publish
+// The SIM800 buffers TX data; dropping the socket/GPRS right after a write
 // discards records the radio has not transmitted yet (slow on 2G). Pump the
-// modem for a while so the payload actually leaves the device.
-void drainModemTxBeforeClose() {
+// modem for a while so the bytes actually leave the device.
+void drainModemTx(unsigned long durationMs) {
   if (usingWifiTransport()) {
     return;
   }
-  for (uint8_t i = 0; i < 150; i++) {
+  const unsigned long deadline = millis() + durationMs;
+  while (static_cast<long>(millis() - deadline) < 0) {
     modemManagerPump();
     delay(20);
   }
@@ -356,7 +357,21 @@ bool mqttPublishPayload(const char *topic, const String &payload, bool retained)
 void mqttDisconnect() {
   PubSubClient &mqttClient = mqttPubClient();
   if (mqttClient.connected()) {
-    mqttClient.disconnect();
+    // Deliberately not PubSubClient::disconnect(): it writes the DISCONNECT
+    // packet and calls stop() in the same breath, and TinyGSM's stop() is a
+    // quick close (AT+CIPCLOSE=<mux>,1) that throws away whatever the SIM800
+    // has not yet transmitted. On 2G the packet routinely dies there, so the
+    // broker never sees a clean close and sits on a half-open socket until
+    // its own keepalive grace expires — "exceeded timeout" in mosquitto.log
+    // on a cycle where every publish actually landed. Write it ourselves,
+    // flush the modem, then close.
+    static const uint8_t kMqttDisconnectPacket[2] = {0xE0, 0x00};
+    Client &transport = mqttSettingsUseTls()
+                            ? static_cast<Client &>(tlsTransportClient())
+                            : plainTransportClient();
+    transport.write(kMqttDisconnectPacket, sizeof(kMqttDisconnectPacket));
+    transport.flush();
+    drainModemTx(MODEM_TX_DRAIN_DISCONNECT_MS);
     Serial.println(F("MQTT disconnected"));
   }
   stopTransport();
@@ -458,7 +473,7 @@ bool mqttClientRunPublishTest(unsigned long networkTimeoutMs,
   const bool availOk =
       mqttPublishPayload(MQTT_TOPIC_AVAILABILITY, F("online"), true);
 
-  drainModemTxBeforeClose();
+  drainModemTx(MODEM_TX_DRAIN_PAYLOAD_MS);
   mqttDisconnect();
   teardownNetwork();
   mqttSettingsShow();
