@@ -418,7 +418,7 @@ Before trusting a newly-built unit unattended in the field:
 ```
 tare | cal <kg> | show | reset | setint <min> | setcell <mcc> <mnc> <lac> <cid>
 setmode gsm|wifi | setwificred <ssid> <pass> | wificonn
-modem | gprs | mqttls | mqtt | send | sleep | modemoff | battery | i2cscan | portal | reboot
+modem | gprs | mqttls | mqtt | send | sleep | modemoff | battery | settime | i2cscan | portal | reboot
 ```
 
 ### Files in this repo

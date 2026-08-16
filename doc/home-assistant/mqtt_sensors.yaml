@@ -21,7 +21,8 @@ mqtt:
       unique_id: beekpr_hive_01_weight_kg
       default_entity_id: sensor.hive_01_weight
       state_topic: beekpr/hive-01/state
-      value_template: "{{ value_json.weight_kg }}"
+      value_template: >-
+        {{ value_json.weight_kg if value_json.weight_kg is not none else 'unknown' }}
       unit_of_measurement: kg
       state_class: measurement
       device_class: weight
@@ -58,7 +59,8 @@ mqtt:
       unique_id: beekpr_hive_01_stable_kg
       default_entity_id: sensor.hive_01_weight_stable
       state_topic: beekpr/hive-01/state
-      value_template: "{{ value_json.stable_kg }}"
+      value_template: >-
+        {{ value_json.stable_kg if value_json.stable_kg is not none else 'unknown' }}
       unit_of_measurement: kg
       state_class: measurement
       device_class: weight

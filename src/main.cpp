@@ -80,7 +80,7 @@ void printBanner() {
   Serial.println(
       F("Commands: tare | cal <kg> | show | reset | setint <min> | setcell <mcc> <mnc> <lac> <cid>"));
   Serial.println(
-      F("           setmode gsm|wifi | setwificred <ssid> <pass> | wificonn | modem | gprs | mqttls | mqtt | send | sleep | modemoff | battery | i2cscan | portal | reboot"));
+      F("           setmode gsm|wifi | setwificred <ssid> <pass> | settime <YYYY-MM-DD HH:MM:SS> | wificonn | modem | gprs | mqttls | mqtt | send | sleep | modemoff | battery | i2cscan | portal | reboot"));
   Serial.println();
   connectivityShow();
   gsmSettingsShow();
@@ -234,6 +234,21 @@ void handleCommand(const String &line) {
 
   if (line == "modemoff") {
     modemManagerPowerOff();
+    return;
+  }
+
+  if (line.startsWith("settime ")) {
+    // "settime 2026-08-16 07:30:00" — UTC, not local. Recovery for a DS3231
+    // the network clock sync never managed to correct.
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+    if (sscanf(line.c_str() + 8, "%d-%d-%d %d:%d:%d", &year, &month, &day, &hour,
+               &minute, &second) != 6) {
+      Serial.println(F("ERR usage: settime YYYY-MM-DD HH:MM:SS (UTC)"));
+      return;
+    }
+    if (rtcClockSetUtc(year, month, day, hour, minute, second)) {
+      rtcClockShow();
+    }
     return;
   }
 

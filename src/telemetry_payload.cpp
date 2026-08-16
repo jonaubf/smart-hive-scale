@@ -40,10 +40,21 @@ String buildTelemetryJson(const char *deviceId, float weightKg, float stableKg,
   } else {
     jsonAppendEscapedString(json, reportTimeIso8601.c_str());
   }
+  // NAN (uncalibrated scale, or a corner that failed to read) must serialize
+  // as null like the per-corner fields below — String(NAN, 3) would emit a
+  // bare `nan`, which isn't valid JSON and would break the whole payload.
   json += ",\"weight_kg\":";
-  json += String(weightKg, 3);
+  if (isnan(weightKg)) {
+    json += "null";
+  } else {
+    json += String(weightKg, 3);
+  }
   json += ",\"stable_kg\":";
-  json += String(stableKg, 3);
+  if (isnan(stableKg)) {
+    json += "null";
+  } else {
+    json += String(stableKg, 3);
+  }
   for (uint8_t corner = 0; corner < NUM_CORNERS; corner++) {
     json += ",\"corner";
     json += String(corner + 1);

@@ -228,9 +228,12 @@ void drainModemTx(unsigned long durationMs) {
 // keeps every reading clean regardless of what the connect/publish sequence
 // does afterward.
 struct SensorSnapshot {
-  float weightKg = 0.0f;
-  float stableKg = 0.0f;
-  float cornersKg[NUM_CORNERS];
+  // NAN, not 0: an uncalibrated or failed read must publish null, never a
+  // plausible-looking 0.000 kg that HA would record as a real measurement
+  // (and that a weight-drop automation would fire on).
+  float weightKg = NAN;
+  float stableKg = NAN;
+  float cornersKg[NUM_CORNERS] = {NAN, NAN, NAN, NAN};
   float tempScaleC = NAN;
   float batteryV = 0.0f;
   int batteryPct = 0;

@@ -28,6 +28,14 @@ bool rtcClockSetNextAlignedAlarm(uint32_t intervalSec);
 // No-op if not present or the system clock isn't plausible yet.
 void rtcClockSyncFromSystemTimeIfNeeded();
 
+// Manually set the DS3231 (and the ESP32 system clock) to a UTC wall-clock
+// time. Recovery path for a device whose carrier never supplies NITZ and
+// whose NTP fallback can't reach the network: without this a wrong DS3231
+// stays wrong forever, since rtcClockSyncFromSystemTimeIfNeeded() will not
+// write a system clock that was never set. Rejects out-of-calendar-range
+// values. Returns false if the RTC is absent or the fields are invalid.
+bool rtcClockSetUtc(int year, int month, int day, int hour, int minute, int second);
+
 // Configures ext1 deep-sleep wake on PIN_RTC_ALARM. No-op if not present.
 void rtcClockPrepareDeepSleepWakeup();
 

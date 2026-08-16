@@ -123,6 +123,18 @@ constexpr uint8_t I2C_MUX_ADDR = 0x70;  // PCA9548A, A0/A1/A2 tied to GND
 // reported in) -> physical PCA9548A channel, as actually wired.
 constexpr uint8_t CORNER_MUX_CHANNEL[NUM_CORNERS] = {0, 1, 2, 7};
 
+// NTP fallback when the carrier doesn't push NITZ time. Synced through the
+// modem's own stack over GPRS (AT+CNTP), so it needs a plain hostname.
+#ifndef MODEM_NTP_SERVER
+#define MODEM_NTP_SERVER "pool.ntp.org"
+#endif
+
+// A modem that has never had its clock set reports its power-on default
+// (2004-ish on SIM800), so anything below this is "no real time yet" rather
+// than a genuine reading. rtc_clock.cpp applies the same idea to the system
+// clock via PLAUSIBLE_TIME_THRESHOLD.
+constexpr int CLOCK_MIN_PLAUSIBLE_YEAR = 2024;
+
 // SIM800L rail control (PIN_MODEM_EN -> CR-SJ5530 #2's EN). No PWRKEY on
 // this module — it auto-boots when the rail comes up, and powers off by
 // dropping the whole rail (AT+CPOWD=1 first for a clean network detach).

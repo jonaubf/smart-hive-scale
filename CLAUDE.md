@@ -145,6 +145,38 @@ clock as authoritative every cycle, skipping re-sync silently re-contaminates th
 stale, drifting time every sleep cycle — this was observed as a steady drift-per-cycle regression on the
 retired T-Call firmware and is why every-call re-sync is load-bearing here too.
 
+### When the clock silently stops correcting itself
+
+The DS3231 has no way to notice it's wrong — it only ever gets rewritten by
+`rtcClockSyncFromSystemTimeIfNeeded()`, which refuses to write a system clock that was never set (below its
+2023 plausibility threshold). So **if `modemManagerSyncClock()` fails, a DS3231 holding a wrong time keeps
+that wrong time forever**, and every `report_time` is confidently wrong by a fixed offset while the report
+*schedule* still looks perfectly healthy (a stable cadence at a shifted phase). Observed in the field
+2026-08-15: 11 consecutive cycles all exactly 8 h behind UTC.
+
+**The timezone field is only meaningful for NITZ.** `modemManagerSyncClock()` requests NTP with timezone 0,
+so the module's clock is set straight to UTC — but `AT+CCLK?` still reports whatever stale offset the module
+holds, and subtracting that from an already-UTC reading is a pure error. This was the actual root cause of
+the 8 h offset: NTP returned a correct `2026-08-16 06:59:15` tagged `tz +8.0`, and the code stored
+`22:59:15` the previous day. Only a NITZ reading is local time and needs its offset removed; the code now
+tracks which source answered and logs both the reported and the applied offset. **Don't collapse that back
+into one unconditional subtraction.**
+
+Two further things make sync failure likely on this hardware, both addressed but worth knowing:
+
+- **NITZ needs `AT&W`.** TinyGSM's `init()` sends `AT+CLTS=1`, but the SIM800 only applies CLTS after it's
+  written to NVRAM *and* the module restarts. This design cuts the modem rail every sleep, so an unsaved
+  CLTS dies with the rail and network time never arrives. `modemManagerRestart()` now persists it.
+- **The NTP fallback used to fail silently.** `modem.NTPServerSync()`'s result was discarded, so a failing
+  fallback looked identical to a working one. It's now checked and logged with the `+CNTP` code (1 = OK,
+  61 network, 62 DNS, 63 connection, 64 bad response, 65 timeout).
+
+Diagnosing: watch a real cycle on serial for `Clock synced:` vs. `ERR NTP sync failed` / `ERR clock sync
+failed`. To correct a wrong RTC immediately without waiting on the network, use the bench command
+`settime YYYY-MM-DD HH:MM:SS` — **UTC, not local time**. Note `report_time` is captured in the pre-radio
+snapshot and the DS3231 is only rewritten at sleep entry, so a successful sync first shows up in the
+*following* report, not the current one.
+
 ### Modem rail control and the GPIO-hold trap (battery-critical)
 
 This SIM800L module has **no `PWRKEY` pin** — it's tied to GND internally, so the module auto-boots the instant
@@ -236,7 +268,7 @@ namespace and expose a `*Show()` that dumps current values to serial — used by
 Defined in `handleCommand()` in `src/main.cpp`. Useful when changing sensor/connectivity/MQTT code — this is the
 primary way to exercise it without a full field cycle: `tare`, `cal <kg>`, `show`, `reset`, `setint <min>`,
 `setcell <mcc> <mnc> <lac> <cid>`, `setmode gsm|wifi`, `setwificred <ssid> <pass>`, `wificonn`, `modem`, `gprs`,
-`mqttls`, `mqtt`, `send`, `sleep`, `modemoff`, `battery`, `i2cscan`, `portal`, `reboot`. Full behavior/expected-
+`mqttls`, `mqtt`, `send`, `sleep`, `modemoff`, `battery`, `settime`, `i2cscan`, `portal`, `reboot`. Full behavior/expected-
 output reference: [doc/local-setup.md](doc/local-setup.md).
 
 `tare` zeroes all 4 corners in one pass (each corner keeps its own offset); `cal <kg>` derives one shared span

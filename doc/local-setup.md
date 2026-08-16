@@ -261,6 +261,7 @@ Serial monitor at **115200 baud**. Commands:
 | `modem` | Power on SIM800L, register on network, print RSSI/operator/cell IDs |
 | `modemoff` | Power off the modem (rail cut via `EN`) |
 | `battery` | Print battery voltage/%/divider ratio — for per-board divider calibration |
+| `settime 2026-08-16 07:30:00` | Set the DS3231 manually, **in UTC** — recovery when NITZ/NTP sync never succeeds |
 | `i2cscan` | Scan the shared bus (expect `0x70` PCA9548A + `0x68` DS3231), then each mux channel for its NAU7802 |
 | `gprs` | Full GPRS test: register → attach GPRS → TCP to MQTT broker → disconnect |
 | `mqtt` | Full MQTT test: GPRS → TLS → publish state + availability to Mosquitto |

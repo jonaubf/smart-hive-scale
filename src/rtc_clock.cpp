@@ -146,6 +146,37 @@ void rtcClockSyncFromSystemTimeIfNeeded() {
   Serial.println(F("DS3231 synced from system clock (UTC)"));
 }
 
+bool rtcClockSetUtc(int year, int month, int day, int hour, int minute, int second) {
+  if (!present) {
+    Serial.println(F("ERR DS3231 not present"));
+    return false;
+  }
+  if (!isPlausibleCalendar(year, month, day, hour, minute, second)) {
+    Serial.println(F("ERR time out of range (expect UTC, year 2023-2100)"));
+    return false;
+  }
+
+  rtc.adjust(DateTime(year, month, day, hour, minute, second));
+
+  // Keep the system clock in step so rtcClockNowIso8601()'s no-DS3231 path
+  // and any later rtcClockSyncFromSystemTimeIfNeeded() agree with what was
+  // just written, instead of pushing a stale 1970 back over it.
+  struct tm parts = {};
+  parts.tm_year = year - 1900;
+  parts.tm_mon = month - 1;
+  parts.tm_mday = day;
+  parts.tm_hour = hour;
+  parts.tm_min = minute;
+  parts.tm_sec = second;
+  const time_t utc = mktime(&parts);
+  struct timeval tv = {.tv_sec = utc, .tv_usec = 0};
+  settimeofday(&tv, nullptr);
+
+  Serial.printf("DS3231 set to %04d-%02d-%02d %02d:%02d:%02d UTC\n", year, month, day,
+                hour, minute, second);
+  return true;
+}
+
 void rtcClockPrepareDeepSleepWakeup() {
   if (!present) {
     return;

@@ -288,6 +288,17 @@ bool modemManagerRestart() {
 
   status.initialized = true;
 
+  // TinyGSM's init() sends AT+CLTS=1 (enable NITZ network time), but the
+  // SIM800 only actually applies CLTS after it has been written to NVRAM and
+  // the module has restarted — and this design cuts the modem rail on every
+  // sleep entry, so a CLTS that was never saved dies with the rail and NITZ
+  // never activates. That silently forces every clock sync onto the slower
+  // NTP fallback, and if that also fails the DS3231 is never corrected at
+  // all. Persisting it is idempotent, so doing it on every boot costs a few
+  // ms and self-heals a replaced or factory-reset module.
+  modem.sendAT(GF("&W"));
+  modem.waitResponse();
+
   String info = modem.getModemInfo();
   info.toCharArray(status.modemInfo, sizeof(status.modemInfo));
   Serial.printf("modem_info=%s\n", status.modemInfo);
@@ -444,16 +455,43 @@ bool modemManagerSyncClock() {
   bool got = modem.getNetworkTime(&year, &month, &day, &hour, &minute, &second,
                                   &tzHours);
 
-  if (!got || year < 2024) {
+  // Which source supplied the reading decides whether its timezone field
+  // means anything. NITZ hands back *local* time plus the network's offset,
+  // so that offset must be subtracted. NTP is requested below with timezone
+  // 0, so the module's clock is set straight to UTC — but AT+CCLK? keeps
+  // reporting whatever stale timezone the module happens to hold, and
+  // subtracting that from an already-UTC time is a pure error. That was the
+  // real cause of the field clock being wrong (2026-08-16: NTP returned a
+  // correct 06:59:15 UTC tagged "tz +8.0"; subtracting it stored 22:59:15
+  // the previous day, and every report_time was 8 h behind from then on).
+  bool clockIsAlreadyUtc = false;
+
+  if (!got || year < CLOCK_MIN_PLAUSIBLE_YEAR) {
     // No NITZ time from the carrier; ask the modem to do NTP over GPRS.
-    Serial.println(F("Clock: no network time, trying NTP via GPRS..."));
-    modem.NTPServerSync("pool.ntp.org", 0);
+    Serial.printf("Clock: no NITZ time (got=%d year=%d), trying NTP via GPRS...\n",
+                  got ? 1 : 0, year);
+    // Result is checked, not discarded: a silent NTP failure here is what
+    // leaves the DS3231 running on a stale time indefinitely, since
+    // rtcClockSyncFromSystemTimeIfNeeded() refuses to write a system clock
+    // that never got set. SIM800 +CNTP codes: 1 = success, 61 network error,
+    // 62 DNS error, 63 connection error, 64 bad service response,
+    // 65 service response timeout.
+    const int ntpResult = static_cast<int>(modem.NTPServerSync(MODEM_NTP_SERVER, 0));
+    if (ntpResult != 1) {
+      Serial.printf("ERR NTP sync failed (+CNTP code %d, server %s)\n", ntpResult,
+                    MODEM_NTP_SERVER);
+    } else {
+      clockIsAlreadyUtc = true;
+    }
     got = modem.getNetworkTime(&year, &month, &day, &hour, &minute, &second,
                                &tzHours);
   }
 
-  if (!got || year < 2024) {
-    Serial.println(F("ERR clock sync failed (no NITZ, NTP failed)"));
+  if (!got || year < CLOCK_MIN_PLAUSIBLE_YEAR) {
+    Serial.printf(
+        "ERR clock sync failed (NITZ and NTP both unusable; got=%d year=%d) — "
+        "DS3231 keeps its current time, use 'settime' to set it manually\n",
+        got ? 1 : 0, year);
     return false;
   }
 
@@ -464,17 +502,25 @@ bool modemManagerSyncClock() {
   timeParts.tm_hour = hour;
   timeParts.tm_min = minute;
   timeParts.tm_sec = second;
-  // mktime() interprets in the local zone, which is UTC by default on ESP32;
-  // the modem reports local time, so subtract its zone offset to get UTC.
+  // mktime() interprets in the local zone, which is UTC by default on ESP32.
+  // Only a NITZ reading is local and needs its offset removed; an NTP-synced
+  // clock is already UTC no matter what timezone AT+CCLK? claims (see above).
+  const float appliedTzHours = clockIsAlreadyUtc ? 0.0f : tzHours;
   const time_t utc =
-      mktime(&timeParts) - static_cast<time_t>(tzHours * 3600.0f);
+      mktime(&timeParts) - static_cast<time_t>(appliedTzHours * 3600.0f);
 
   struct timeval tv = {.tv_sec = utc, .tv_usec = 0};
   settimeofday(&tv, nullptr);
 
-  Serial.printf("Clock synced: %04d-%02d-%02d %02d:%02d:%02d (tz %+.1f)\n",
-                year, month, day, hour, minute, second,
-                static_cast<double>(tzHours));
+  struct tm utcParts;
+  gmtime_r(&utc, &utcParts);
+  Serial.printf(
+      "Clock synced from %s: %04d-%02d-%02d %02d:%02d:%02d UTC "
+      "(modem reported tz %+.1f, applied %+.1f)\n",
+      clockIsAlreadyUtc ? "NTP" : "NITZ", utcParts.tm_year + 1900,
+      utcParts.tm_mon + 1, utcParts.tm_mday, utcParts.tm_hour, utcParts.tm_min,
+      utcParts.tm_sec, static_cast<double>(tzHours),
+      static_cast<double>(appliedTzHours));
   return true;
 }
 
